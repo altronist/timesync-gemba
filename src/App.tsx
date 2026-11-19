@@ -1,9 +1,10 @@
 // @ts-nocheck
-import React, { useState, useEffect, useMemo, useCallback } from 'react';
+import React, { useState, useEffect, useMemo, useCallback, useRef } from 'react';
 import {
   Users, AlertCircle, Check, MapPin, Calendar, Clock, Save, Trash2, X, Plus,
   CheckSquare, ChevronLeft, ChevronRight, Lock, Mail, LogOut, ShieldCheck,
-  KeyRound, Globe, UserPlus, Download, Search, Info, UserCheck, RefreshCw, Share2, Cloud, Pencil
+  KeyRound, Globe, UserPlus, Download, Search, Info, UserCheck, RefreshCw,
+  Share2, Cloud, Pencil, Upload, Video, CalendarPlus, AlertTriangle
 } from 'lucide-react';
 
 // ============================================================================
@@ -231,6 +232,175 @@ const getMondayMidnightUtc = () => {
 
 const CURRENT_MONDAY = getMondayMidnightUtc();
 
+// --- ICS Calendar Helpers (Local Parsing + Export + Teams Link) ---
+const formatIcsUtc = (utcMs) => {
+  const d = new Date(utcMs);
+  const pad = (n) => String(n).padStart(2, '0');
+  return (
+    d.getUTCFullYear() +
+    pad(d.getUTCMonth() + 1) +
+    pad(d.getUTCDate()) + 'T' +
+    pad(d.getUTCHours()) +
+    pad(d.getUTCMinutes()) +
+    pad(d.getUTCSeconds()) + 'Z'
+  );
+};
+
+const downloadMeetingIcs = (groupName, utcTimestamp, memberEmails = []) => {
+  const startStr = formatIcsUtc(utcTimestamp);
+  const endStr = formatIcsUtc(utcTimestamp + 3600 * 1000);
+  const nowStr = formatIcsUtc(Date.now());
+  const safeName = groupName.replace(/[,;\\]/g, ' ');
+  const attendeesLines = memberEmails.map(em => `ATTENDEE;RSVP=TRUE:mailto:${em}`).join('\r\n');
+
+  const icsContent = [
+    'BEGIN:VCALENDAR',
+    'VERSION:2.0',
+    'PRODID:-//TimeSync GEMBA//SKEMA Cohort Scheduler//EN',
+    'CALSCALE:GREGORIAN',
+    'METHOD:PUBLISH',
+    'BEGIN:VEVENT',
+    `UID:timesync-${utcTimestamp}-${Math.random().toString(36).slice(2, 8)}@timesync-gemba`,
+    `DTSTAMP:${nowStr}`,
+    `DTSTART:${startStr}`,
+    `DTEND:${endStr}`,
+    `SUMMARY:GEMBA: ${safeName}`,
+    `DESCRIPTION:Scheduled via TimeSync GEMBA.`,
+    attendeesLines,
+    'END:VEVENT',
+    'END:VCALENDAR'
+  ].filter(Boolean).join('\r\n');
+
+  const blob = new Blob([icsContent], { type: 'text/calendar;charset=utf-8' });
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement('a');
+  a.href = url;
+  a.download = `GEMBA-${groupName.replace(/[^a-z0-9]+/gi, '-').toLowerCase()}.ics`;
+  a.click();
+  URL.revokeObjectURL(url);
+};
+
+const buildTeamsMeetingUrl = (groupName, utcTimestamp, memberEmails = []) => {
+  const startIso = new Date(utcTimestamp).toISOString();
+  const endIso = new Date(utcTimestamp + 3600 * 1000).toISOString();
+  const params = new URLSearchParams({
+    subject: `GEMBA: ${groupName}`,
+    startTime: startIso,
+    endTime: endIso,
+    content: `Study group session scheduled via TimeSync GEMBA.`,
+  });
+  if (memberEmails.length > 0) {
+    params.set('attendees', memberEmails.join(','));
+  }
+  return `https://teams.microsoft.com/l/meeting/new?${params.toString()}`;
+};
+
+const parseIcsDateToUtcMs = (rawValue, paramStr = '', fallbackTz = DETECTED_TIMEZONE) => {
+  if (!rawValue) return null;
+  const val = rawValue.trim();
+
+  // All-day date YYYYMMDD -> skip treating as busy unless timed, or treat as local midnight
+  const dateOnlyMatch = val.match(/^(\d{4})(\d{2})(\d{2})$/);
+  if (dateOnlyMatch) {
+    return null; // Ignore all-day banners (holidays/OOO labels) so they don't grey out entire days
+  }
+
+  const dtMatch = val.match(/^(\d{4})(\d{2})(\d{2})T(\d{2})(\d{2})(\d{2})?(Z)?$/);
+  if (!dtMatch) return null;
+
+  const y = Number(dtMatch[1]);
+  const m = Number(dtMatch[2]) - 1;
+  const d = Number(dtMatch[3]);
+  const hr = Number(dtMatch[4]);
+  const min = Number(dtMatch[5]);
+  const isUtc = Boolean(dtMatch[7]);
+
+  if (isUtc) {
+    return Date.UTC(y, m, d, hr, min, 0);
+  }
+
+  const tzMatch = paramStr.match(/TZID=([^;:]+)/i);
+  let tz = fallbackTz;
+  if (tzMatch && tzMatch[1]) {
+    const candidate = tzMatch[1].replace(/^"|"$/g, '').trim();
+    if (ALL_IANA_ZONES.includes(candidate)) {
+      tz = candidate;
+    }
+  }
+  return localToUtcMs(y, m, d, hr, min, tz);
+};
+
+const parseIcsFile = (icsText, fallbackTz) => {
+  const unfolded = icsText.replace(/\r\n[ \t]/g, '').replace(/\n[ \t]/g, '');
+  const lines = unfolded.split(/\r?\n/);
+  const events = [];
+  let inEvent = false;
+  let current = {};
+
+  const horizonStart = Date.now() - 14 * 24 * 3600 * 1000;
+  const horizonEnd = Date.now() + 90 * 24 * 3600 * 1000;
+
+  for (const line of lines) {
+    if (line === 'BEGIN:VEVENT') {
+      inEvent = true;
+      current = {};
+      continue;
+    }
+    if (line === 'END:VEVENT') {
+      inEvent = false;
+      if (current.start && current.end && current.end > current.start && current.transp !== 'TRANSPARENT') {
+        const duration = current.end - current.start;
+        const summary = current.summary || 'Busy';
+
+        if (current.rrule && /FREQ=WEEKLY/i.test(current.rrule)) {
+          const untilMatch = current.rrule.match(/UNTIL=([0-9TZ]+)/i);
+          const countMatch = current.rrule.match(/COUNT=(\d+)/i);
+          const intervalMatch = current.rrule.match(/INTERVAL=(\d+)/i);
+          const intervalWeeks = intervalMatch ? Math.max(1, Number(intervalMatch[1])) : 1;
+          const maxCount = countMatch ? Number(countMatch[1]) : 26;
+          const untilMs = untilMatch ? (parseIcsDateToUtcMs(untilMatch[1], '', fallbackTz) || horizonEnd) : horizonEnd;
+
+          let occStart = current.start;
+          let count = 0;
+          while (occStart <= Math.min(untilMs, horizonEnd) && count < maxCount) {
+            if (occStart + duration >= horizonStart) {
+              events.push({ start: occStart, end: occStart + duration, summary });
+            }
+            occStart += intervalWeeks * 7 * 24 * 3600 * 1000;
+            count++;
+          }
+        } else if (current.end >= horizonStart && current.start <= horizonEnd) {
+          events.push({ start: current.start, end: current.end, summary });
+        }
+      }
+      continue;
+    }
+
+    if (!inEvent) continue;
+    const colonIdx = line.indexOf(':');
+    if (colonIdx === -1) continue;
+    const left = line.slice(0, colonIdx);
+    const value = line.slice(colonIdx + 1);
+    const semiIdx = left.indexOf(';');
+    const propName = (semiIdx === -1 ? left : left.slice(0, semiIdx)).toUpperCase();
+    const params = semiIdx === -1 ? '' : left.slice(semiIdx + 1);
+
+    if (propName === 'DTSTART') {
+      current.start = parseIcsDateToUtcMs(value, params, fallbackTz);
+    } else if (propName === 'DTEND') {
+      current.end = parseIcsDateToUtcMs(value, params, fallbackTz);
+    } else if (propName === 'SUMMARY') {
+      current.summary = value.replace(/\\,/g, ',').replace(/\\;/g, ';').replace(/\\n/g, ' ').trim();
+    } else if (propName === 'RRULE') {
+      current.rrule = value;
+    } else if (propName === 'TRANSP') {
+      current.transp = value.trim().toUpperCase();
+    }
+  }
+
+  return events;
+};
+
 // --- Searchable IANA Timezone Picker ---
 function TimezonePicker({ value, onChange, refUtcMs, placeholder = 'Search city or timezone (e.g. Paris, New York, Singapore)...', compact = false }) {
   const [isOpen, setIsOpen] = useState(false);
@@ -329,6 +499,11 @@ export default function App() {
   const [syncError, setSyncError] = useState('');
   const [toastMessage, setToastMessage] = useState('');
 
+  // Personal Local ICS Calendar Overlay (Never sent to Cloud)
+  const [icsEvents, setIcsEvents] = useState([]);
+  const [icsFileName, setIcsFileName] = useState('');
+  const icsInputRef = useRef(null);
+
   // Auth State
   const [isAuthenticated, setIsAuthenticated] = useState(false);
   const [authMode, setAuthMode] = useState('login'); // 'login' | 'signup' | 'reset'
@@ -391,6 +566,68 @@ export default function App() {
     setToastMessage(msg);
     setTimeout(() => setToastMessage(''), 3000);
   };
+
+  // Load saved local ICS overlay when user signs in
+  useEffect(() => {
+    if (!currentUser) {
+      setIcsEvents([]);
+      setIcsFileName('');
+      return;
+    }
+    try {
+      const raw = localStorage.getItem(`timesync_ics_${currentUser.id}`);
+      if (raw) {
+        const parsed = JSON.parse(raw);
+        if (Array.isArray(parsed.events)) {
+          setIcsEvents(parsed.events);
+          setIcsFileName(parsed.fileName || 'calendar.ics');
+        }
+      }
+    } catch {
+      // ignore storage errors
+    }
+  }, [currentUser?.id]);
+
+  const handleIcsUpload = (e) => {
+    const file = e.target.files?.[0];
+    if (!file || !currentUser) return;
+    const reader = new FileReader();
+    reader.onload = (ev) => {
+      try {
+        const text = String(ev.target?.result || '');
+        const parsed = parseIcsFile(text, currentUser.timezone || DETECTED_TIMEZONE);
+        setIcsEvents(parsed);
+        setIcsFileName(file.name);
+        localStorage.setItem(`timesync_ics_${currentUser.id}`, JSON.stringify({
+          fileName: file.name,
+          events: parsed,
+        }));
+        showToast(`Synced ${parsed.length} calendar events locally (private).`);
+      } catch {
+        showToast('Could not read .ics file. Please export a standard .ics calendar.');
+      }
+    };
+    reader.readAsText(file);
+    e.target.value = '';
+  };
+
+  const handleClearIcs = () => {
+    if (!currentUser) return;
+    setIcsEvents([]);
+    setIcsFileName('');
+    try {
+      localStorage.removeItem(`timesync_ics_${currentUser.id}`);
+    } catch {
+      // ignore
+    }
+    showToast('Personal calendar overlay cleared.');
+  };
+
+  const getBusyIcsEvent = useCallback((slotUtcStart, durationMin) => {
+    if (icsEvents.length === 0) return null;
+    const slotEnd = slotUtcStart + durationMin * 60 * 1000;
+    return icsEvents.find(ev => ev.start < slotEnd && ev.end > slotUtcStart) || null;
+  }, [icsEvents]);
 
   // Returns the group's upcoming meeting only if it hasn't ended yet
   const getUpcomingMeeting = (groupId) => {
@@ -721,6 +958,7 @@ export default function App() {
           })
         )
       );
+      localStorage.removeItem(`timesync_ics_${idToDelete}`);
     } catch {
       setPrivacyNotice('Could not complete cloud deletion. Please try again.');
       return;
@@ -792,13 +1030,21 @@ export default function App() {
     return grid;
   };
 
+  // Grey <-> Amber toggle for ICS-busy slots; normal 3-state cycle for free slots
   const cycleState = (utcTimestamp) => {
     if (!currentUser) return;
     if (getUserConfirmedMeeting(currentUser.id, utcTimestamp)) return;
     const current = availabilities[currentUser.id]?.[utcTimestamp] || 'unavailable';
+    const isBusyInIcs = Boolean(getBusyIcsEvent(utcTimestamp, slotDuration));
+
     let nextState = null;
-    if (current === 'unavailable') nextState = 'available';
-    else if (current === 'available') nextState = 'preferred';
+    if (isBusyInIcs) {
+      // Grey (unavailable) <-> Amber (available)
+      nextState = current === 'unavailable' ? 'available' : null;
+    } else {
+      if (current === 'unavailable') nextState = 'available';
+      else if (current === 'available') nextState = 'preferred';
+    }
 
     setAvailabilities(prev => {
       const userAvail = { ...(prev[currentUser.id] || {}) };
@@ -1303,6 +1549,13 @@ export default function App() {
 
   const isGroupAdmin = activeGroup ? (!activeGroup.adminId || activeGroup.adminId === currentUser.id) : false;
   const activeUpcomingMeeting = activeGroup ? getUpcomingMeeting(activeGroup.id) : null;
+  const showWeekNav = activeTab === 'avail' || (activeTab === 'groups' && Boolean(activeGroup) && !isCreatingGroup && !isEditingGroup);
+
+  const activeGroupMemberEmails = activeGroup
+    ? activeGroup.members
+        .map(id => cohort.find(u => u.id === id)?.email)
+        .filter(Boolean)
+    : [];
 
   // --- MAIN APP SHELL ---
   return (
@@ -1362,26 +1615,28 @@ export default function App() {
         </div>
       )}
 
-      {/* Global ISO 8601 Week Navigator */}
-      <div className="bg-slate-800 text-slate-200 px-4 py-2.5 flex items-center justify-between text-sm shadow-inner z-10 shrink-0 border-t border-slate-700">
-        <button onClick={() => setWeekOffset(w => w - 1)} className="px-2 py-1 hover:bg-slate-700 hover:text-white rounded flex items-center gap-1 transition-colors">
-          <ChevronLeft className="w-4 h-4" /> Prev
-        </button>
-        <div className="flex flex-col sm:flex-row items-center gap-1 sm:gap-2 text-center">
-          <div className="font-semibold text-white flex items-center gap-1.5">
-            <Calendar className="w-4 h-4 text-indigo-400" />
-            <span>{weekInfo.primary}</span>
+      {/* Global ISO 8601 Week Navigator (Only shown on My Avail & Group Detail) */}
+      {showWeekNav && (
+        <div className="bg-slate-800 text-slate-200 px-4 py-2.5 flex items-center justify-between text-sm shadow-inner z-10 shrink-0 border-t border-slate-700">
+          <button onClick={() => setWeekOffset(w => w - 1)} className="px-2 py-1 hover:bg-slate-700 hover:text-white rounded flex items-center gap-1 transition-colors">
+            <ChevronLeft className="w-4 h-4" /> Prev
+          </button>
+          <div className="flex flex-col sm:flex-row items-center gap-1 sm:gap-2 text-center">
+            <div className="font-semibold text-white flex items-center gap-1.5">
+              <Calendar className="w-4 h-4 text-indigo-400" />
+              <span>{weekInfo.primary}</span>
+            </div>
+            {weekInfo.relative && (
+              <span className="text-[10px] font-bold uppercase tracking-wider bg-indigo-500/30 text-indigo-200 px-2 py-0.5 rounded-full border border-indigo-400/30">
+                {weekInfo.relative}
+              </span>
+            )}
           </div>
-          {weekInfo.relative && (
-            <span className="text-[10px] font-bold uppercase tracking-wider bg-indigo-500/30 text-indigo-200 px-2 py-0.5 rounded-full border border-indigo-400/30">
-              {weekInfo.relative}
-            </span>
-          )}
+          <button onClick={() => setWeekOffset(w => w + 1)} className="px-2 py-1 hover:bg-slate-700 hover:text-white rounded flex items-center gap-1 transition-colors">
+            Next <ChevronRight className="w-4 h-4" />
+          </button>
         </div>
-        <button onClick={() => setWeekOffset(w => w + 1)} className="px-2 py-1 hover:bg-slate-700 hover:text-white rounded flex items-center gap-1 transition-colors">
-          Next <ChevronRight className="w-4 h-4" />
-        </button>
-      </div>
+      )}
 
       {/* TAB 1: MY AVAIL */}
       {activeTab === 'avail' && (
@@ -1452,6 +1707,34 @@ export default function App() {
                 </button>
               </div>
 
+              {/* Personal Local .ics Calendar Overlay */}
+              <input
+                ref={icsInputRef}
+                type="file"
+                accept=".ics,text/calendar"
+                onChange={handleIcsUpload}
+                className="hidden"
+              />
+              <div className="flex items-center gap-1">
+                <button
+                  onClick={() => icsInputRef.current?.click()}
+                  title="Overlay your Outlook/Google/Apple .ics calendar locally (private, never uploaded)"
+                  className="px-3 py-1.5 rounded-full text-xs font-medium bg-white text-slate-700 border border-slate-300 hover:bg-slate-100 shadow-sm transition-colors flex items-center gap-1.5"
+                >
+                  <Upload className="w-3.5 h-3.5 text-indigo-600" />
+                  <span>{icsFileName ? 'Replace .ics' : 'Import .ics'}</span>
+                </button>
+                {icsFileName && (
+                  <button
+                    onClick={handleClearIcs}
+                    title={`Clear calendar overlay (${icsFileName})`}
+                    className="p-1.5 rounded-full bg-white border border-slate-200 text-slate-400 hover:text-red-600 hover:bg-red-50 shadow-sm transition-colors"
+                  >
+                    <X className="w-3.5 h-3.5" />
+                  </button>
+                )}
+              </div>
+
               <button
                 onClick={clearWeek}
                 className="px-3 py-1.5 rounded-full text-xs font-medium bg-white text-red-600 border border-red-200 hover:bg-red-50 shadow-sm transition-colors ml-auto flex items-center gap-1"
@@ -1461,10 +1744,16 @@ export default function App() {
             </div>
 
             <div className="flex flex-wrap items-center justify-between gap-2 mt-3 text-[11px] text-slate-500">
-              <div className="flex items-center gap-4">
+              <div className="flex flex-wrap items-center gap-3">
                 <span className="flex items-center gap-1"><span className="w-3 h-3 rounded-sm bg-blue-400 inline-block"></span> Available</span>
                 <span className="flex items-center gap-1"><span className="w-3 h-3 rounded-sm bg-indigo-700 inline-block"></span> Preferred</span>
                 <span className="flex items-center gap-1"><span className="w-3 h-3 rounded-sm bg-emerald-500 inline-block"></span> Confirmed</span>
+                {icsEvents.length > 0 && (
+                  <>
+                    <span className="flex items-center gap-1"><span className="w-3 h-3 rounded-sm bg-slate-300 inline-block"></span> Busy (.ics)</span>
+                    <span className="flex items-center gap-1"><span className="w-3 h-3 rounded-sm bg-amber-400 inline-block"></span> Conflict (Free)</span>
+                  </>
+                )}
               </div>
               <div className="inline-flex rounded-lg border border-slate-200 bg-white p-0.5 text-[11px] font-semibold">
                 <button
@@ -1507,20 +1796,36 @@ export default function App() {
                       {day.slots.map(slot => {
                         const state = availabilities[currentUser.id]?.[slot.utcTimestamp] || 'unavailable';
                         const confirmedGroup = getUserConfirmedMeeting(currentUser.id, slot.utcTimestamp);
+                        const busyEvent = confirmedGroup ? null : getBusyIcsEvent(slot.utcTimestamp, slotDuration);
+                        const isConflict = Boolean(busyEvent && (state === 'available' || state === 'preferred'));
 
                         let bgColor = 'bg-white border-slate-200';
-                        if (confirmedGroup) bgColor = 'bg-emerald-500 border-emerald-600 flex items-center justify-center text-white';
-                        else if (state === 'available') bgColor = 'bg-blue-400 border-blue-400';
-                        else if (state === 'preferred') bgColor = 'bg-indigo-700 border-indigo-700';
+                        let tooltip = `${day.dayName} ${slot.label}`;
+
+                        if (confirmedGroup) {
+                          bgColor = 'bg-emerald-500 border-emerald-600 flex items-center justify-center text-white';
+                          tooltip = `Confirmed Meeting: ${confirmedGroup.name}`;
+                        } else if (isConflict) {
+                          bgColor = 'bg-amber-400 border-amber-500 flex items-center justify-center text-amber-950';
+                          tooltip = `Conflict (Marked Free): ${busyEvent.summary} — click to mark Busy`;
+                        } else if (busyEvent) {
+                          bgColor = 'bg-slate-200 border-slate-300';
+                          tooltip = `Busy (.ics): ${busyEvent.summary} — click to accommodate`;
+                        } else if (state === 'available') {
+                          bgColor = 'bg-blue-400 border-blue-400';
+                        } else if (state === 'preferred') {
+                          bgColor = 'bg-indigo-700 border-indigo-700';
+                        }
 
                         return (
                           <div
                             key={slot.utcTimestamp}
-                            title={confirmedGroup ? `Confirmed Meeting: ${confirmedGroup.name}` : `${day.dayName} ${slot.label}`}
+                            title={tooltip}
                             onPointerDown={() => cycleState(slot.utcTimestamp)}
                             className={`flex-1 h-10 border rounded-sm cursor-pointer transition-colors hover:brightness-95 active:scale-95 ${bgColor}`}
                           >
                             {confirmedGroup && <Check className="w-3.5 h-3.5 m-auto" strokeWidth={3} />}
+                            {!confirmedGroup && isConflict && <AlertTriangle className="w-3.5 h-3.5 m-auto" strokeWidth={2.5} />}
                           </div>
                         );
                       })}
@@ -1834,7 +2139,7 @@ export default function App() {
             {groupTab === 'ranked' && (
               <>
                 {activeUpcomingMeeting ? (
-                  <div className="bg-emerald-50 border-2 border-emerald-400 rounded-xl p-8 text-center shadow-sm mt-2">
+                  <div className="bg-emerald-50 border-2 border-emerald-400 rounded-xl p-6 sm:p-8 text-center shadow-sm mt-2">
                     <div className="w-16 h-16 bg-emerald-100 rounded-full flex items-center justify-center mx-auto mb-4">
                       <Check className="w-8 h-8 text-emerald-600" strokeWidth={3} />
                     </div>
@@ -1842,15 +2147,35 @@ export default function App() {
                     <p className="text-emerald-700 font-medium mb-2 text-xl">
                       {formatTimeForZoneFull(activeUpcomingMeeting.utcTimestamp, activeTimezone)}
                     </p>
-                    <p className="text-xs text-emerald-700/80 mb-6">
-                      This time is blocked across all other GEMBA groups. The organizer can send the Outlook/Teams invite.
+                    <p className="text-xs text-emerald-700/80 mb-6 max-w-md mx-auto">
+                      This time is blocked across all other GEMBA groups.
                     </p>
+
+                    <div className="flex flex-col sm:flex-row items-center justify-center gap-3 mb-4">
+                      {isGroupAdmin && (
+                        <a
+                          href={buildTeamsMeetingUrl(activeGroup.name, activeUpcomingMeeting.utcTimestamp, activeGroupMemberEmails)}
+                          target="_blank"
+                          rel="noopener noreferrer"
+                          className="w-full sm:w-auto px-5 py-3 bg-indigo-600 hover:bg-indigo-700 text-white font-semibold rounded-lg shadow-sm transition-colors flex items-center justify-center gap-2 text-sm"
+                        >
+                          <Video className="w-4 h-4" /> Schedule in Teams
+                        </a>
+                      )}
+                      <button
+                        onClick={() => downloadMeetingIcs(activeGroup.name, activeUpcomingMeeting.utcTimestamp, activeGroupMemberEmails)}
+                        className="w-full sm:w-auto px-5 py-3 bg-white hover:bg-emerald-100 text-emerald-800 border-2 border-emerald-300 font-semibold rounded-lg shadow-sm transition-colors flex items-center justify-center gap-2 text-sm"
+                      >
+                        <CalendarPlus className="w-4 h-4" /> Add to Calendar (.ics)
+                      </button>
+                    </div>
+
                     {isGroupAdmin && (
                       <button
                         onClick={() => handleUnconfirmMeeting(activeGroup.id)}
-                        className="px-6 py-3 bg-white text-emerald-700 border-2 border-emerald-300 font-semibold rounded-lg shadow-sm hover:bg-emerald-100 transition-colors flex items-center justify-center mx-auto gap-2"
+                        className="mt-2 px-4 py-2 text-xs text-emerald-700 hover:text-emerald-900 hover:underline font-semibold inline-flex items-center gap-1"
                       >
-                        <X className="w-5 h-5" /> Unconfirm / Adjust
+                        <X className="w-3.5 h-3.5" /> Unconfirm / Pick Another Slot
                       </button>
                     )}
                   </div>
@@ -2109,6 +2434,7 @@ export default function App() {
               <ul className="list-disc pl-5 space-y-1.5">
                 <li><strong>EU Paris Hosting:</strong> All cohort records are stored in West EU (Paris) servers.</li>
                 <li><strong>Minimal Data Stored:</strong> Only your name, <code>@skema.edu</code> email, broad IANA timezone (no GPS or address), and weekly free/busy slots.</li>
+                <li><strong>Local-Only Calendar Imports:</strong> Uploaded <code>.ics</code> files are parsed strictly in your browser and never sent to our servers.</li>
                 <li><strong>Self-Registration Only:</strong> Bulk uploading classmates' emails is disabled to ensure explicit opt-in consent.</li>
                 <li><strong>Independent Student Tool:</strong> Operated voluntarily by GEMBA cohort members, not an official SKEMA IT system.</li>
               </ul>
