@@ -151,7 +151,74 @@ const formatOffsetLabel = (offsetMin) => {
   const abs = Math.abs(offsetMin);
   const hrs = Math.floor(abs / 60);
   const mins = abs % 60;
-  return mins === 0 ? `UTC${sign}${hrs}` : `UTC${sign}${hrs}:${mins.toString().padStart(2, '0')}`; };  const getZoneAbbreviation = (utcMs, timeZone) => { try { const parts = new Intl.DateTimeFormat('en-US', { timeZone, timeZoneName: 'short', }).formatToParts(new Date(utcMs)); return parts.find(p => p.type === 'timeZoneName')?.value \vert{}\vert{} ''; } catch { return ''; } };  const localToUtcMs = (year, monthIndex, day, hour, minute, timeZone) => { const guess = Date.UTC(year, monthIndex, day, hour, minute, 0); const offset1 = getUtcOffsetMinutes(guess, timeZone); const utc1 = guess - offset1 * 60000; const offset2 = getUtcOffsetMinutes(utc1, timeZone); const exactUtc = guess - offset2 * 60000; return Math.round(exactUtc / 1800000) * 1800000; };  const getLocalParts = (utcMs, timeZone) => { try { const dtf = new Intl.DateTimeFormat('en-US', { timeZone, weekday: 'short', month: 'short', day: 'numeric', hour: '2-digit', minute: '2-digit', hourCycle: 'h23', timeZoneName: 'short', }); const parts = dtf.formatToParts(new Date(utcMs)); const map = {}; for (const p of parts) map[p.type] = p.value; const hourNum = Number(map.hour) === 24 ? 0 : Number(map.hour); return { weekday: map.weekday \vert{}\vert{} 'Mon', month: map.month \vert{}\vert{} '', day: map.day \vert{}\vert{} '', hourNum, hourStr: hourNum.toString().padStart(2, '0'), minuteStr: map.minute \vert{}\vert{} '00', tzAbbr: map.timeZoneName \vert{}\vert{} '', }; } catch { const d = new Date(utcMs); return { weekday: DAYS[d.getUTCDay() === 0 ? 6 : d.getUTCDay() - 1], month: d.toLocaleString('en-US', { month: 'short', timeZone: 'UTC' }), day: String(d.getUTCDate()), hourNum: d.getUTCHours(), hourStr: d.getUTCHours().toString().padStart(2, '0'), minuteStr: d.getUTCMinutes().toString().padStart(2, '0'), tzAbbr: 'UTC', }; } };  const formatZoneOptionLabel = (tz, refUtcMs) => { const offsetMin = getUtcOffsetMinutes(refUtcMs, tz); const abbr = getZoneAbbreviation(refUtcMs, tz); const prettyName = tz.replace(/_/g, ' '); return `${prettyName} (${abbr ? abbr + ' • ' : ''}${formatOffsetLabel(offsetMin)})`;
+  return mins === 0 ? `UTC${sign}${hrs}` : `UTC${sign}${hrs}:${mins.toString().padStart(2, '0')}`;
+};
+
+const getZoneAbbreviation = (utcMs, timeZone) => {
+  try {
+    const parts = new Intl.DateTimeFormat('en-US', {
+      timeZone,
+      timeZoneName: 'short',
+    }).formatToParts(new Date(utcMs));
+    return parts.find(p => p.type === 'timeZoneName')?.value || '';
+  } catch {
+    return '';
+  }
+};
+
+const localToUtcMs = (year, monthIndex, day, hour, minute, timeZone) => {
+  const guess = Date.UTC(year, monthIndex, day, hour, minute, 0);
+  const offset1 = getUtcOffsetMinutes(guess, timeZone);
+  const utc1 = guess - offset1 * 60000;
+  const offset2 = getUtcOffsetMinutes(utc1, timeZone);
+  const exactUtc = guess - offset2 * 60000;
+  return Math.round(exactUtc / 1800000) * 1800000;
+};
+
+const getLocalParts = (utcMs, timeZone) => {
+  try {
+    const dtf = new Intl.DateTimeFormat('en-US', {
+      timeZone,
+      weekday: 'short',
+      month: 'short',
+      day: 'numeric',
+      hour: '2-digit',
+      minute: '2-digit',
+      hourCycle: 'h23',
+      timeZoneName: 'short',
+    });
+    const parts = dtf.formatToParts(new Date(utcMs));
+    const map = {};
+    for (const p of parts) map[p.type] = p.value;
+    const hourNum = Number(map.hour) === 24 ? 0 : Number(map.hour);
+    return {
+      weekday: map.weekday || 'Mon',
+      month: map.month || '',
+      day: map.day || '',
+      hourNum,
+      hourStr: hourNum.toString().padStart(2, '0'),
+      minuteStr: map.minute || '00',
+      tzAbbr: map.timeZoneName || '',
+    };
+  } catch {
+    const d = new Date(utcMs);
+    return {
+      weekday: DAYS[d.getUTCDay() === 0 ? 6 : d.getUTCDay() - 1],
+      month: d.toLocaleString('en-US', { month: 'short', timeZone: 'UTC' }),
+      day: String(d.getUTCDate()),
+      hourNum: d.getUTCHours(),
+      hourStr: d.getUTCHours().toString().padStart(2, '0'),
+      minuteStr: d.getUTCMinutes().toString().padStart(2, '0'),
+      tzAbbr: 'UTC',
+    };
+  }
+};
+
+const formatZoneOptionLabel = (tz, refUtcMs) => {
+  const offsetMin = getUtcOffsetMinutes(refUtcMs, tz);
+  const abbr = getZoneAbbreviation(refUtcMs, tz);
+  const prettyName = tz.replace(/_/g, ' ');
+  return `${prettyName} (${abbr ? abbr + ' • ' : ''}${formatOffsetLabel(offsetMin)})`;
 };
 
 const getMondayMidnightUtc = () => {
@@ -192,4 +259,1710 @@ function TimezonePicker({ value, onChange, refUtcMs, placeholder = 'Search city 
       <button
         type="button"
         onClick={() => setIsOpen(o => !o)}
-        className={`w-full text-left bg-white border border-slate-300 rounded-lg flex items-center justify-between gap-
+        className={`w-full text-left bg-white border border-slate-300 rounded-lg flex items-center justify-between gap-2 hover:border-indigo-400 focus:ring-2 focus:ring-indigo-500 outline-none transition-colors ${compact ? 'px-3 py-2 text-xs font-semibold text-blue-950 border-blue-200' : 'px-3 py-2.5 text-sm text-slate-800'}`}
+      >
+        <span className="truncate flex items-center gap-1.5">
+          <Globe className="w-4 h-4 text-indigo-500 shrink-0" />
+          <span className="truncate">{formatZoneOptionLabel(value, refUtcMs)}</span>
+        </span>
+        <span className="text-[10px] text-slate-400 shrink-0">{isOpen ? '▲' : '▼'}</span>
+      </button>
+
+      {isOpen && (
+        <div className="absolute left-0 right-0 mt-1 bg-white border border-slate-200 rounded-xl shadow-xl z-50 overflow-hidden">
+          <div className="p-2 border-b border-slate-100 flex items-center gap-2 bg-slate-50">
+            <Search className="w-4 h-4 text-slate-400 shrink-0" />
+            <input
+              type="text"
+              autoFocus
+              value={query}
+              onChange={(e) => setQuery(e.target.value)}
+              placeholder={placeholder}
+              className="w-full text-xs bg-transparent outline-none text-slate-800 placeholder-slate-400"
+            />
+            {query && (
+              <button type="button" onClick={() => setQuery('')} className="text-slate-400 hover:text-slate-600">
+                <X className="w-3.5 h-3.5" />
+              </button>
+            )}
+          </div>
+          <div className="max-h-56 overflow-y-auto divide-y divide-slate-50">
+            {filteredZones.length === 0 ? (
+              <div className="p-3 text-xs text-slate-400 text-center">No matching IANA timezone found.</div>
+            ) : (
+              filteredZones.map(tz => {
+                const isSelected = tz === value;
+                return (
+                  <button
+                    key={tz}
+                    type="button"
+                    onClick={() => {
+                      onChange(tz);
+                      setIsOpen(false);
+                      setQuery('');
+                    }}
+                    className={`w-full text-left px-3 py-2 text-xs flex items-center justify-between hover:bg-indigo-50 transition-colors ${isSelected ? 'bg-indigo-50 text-indigo-700 font-semibold' : 'text-slate-700'}`}
+                  >
+                    <span className="truncate">{formatZoneOptionLabel(tz, refUtcMs)}</span>
+                    {isSelected && <Check className="w-3.5 h-3.5 text-indigo-600 shrink-0" />}
+                  </button>
+                );
+              })
+            )}
+          </div>
+          <div className="px-3 py-1.5 bg-slate-50 border-t border-slate-100 text-[10px] text-slate-500 flex items-center gap-1">
+            <Info className="w-3 h-3 shrink-0" /> Standard IANA database • Daylight Saving Time (DST) is automatic.
+          </div>
+        </div>
+      )}
+    </div>
+  );
+}
+
+export default function App() {
+  const [cohort, setCohort] = useState([]);
+  const [groups, setGroups] = useState([]);
+  const [availabilities, setAvailabilities] = useState({});
+  const [weekTimezones, setWeekTimezones] = useState({}); // { [userId]: { [weekMondayUtc]: 'Europe/Paris' } }
+  const [confirmedMeetings, setConfirmedMeetings] = useState({});
+  const [isSyncing, setIsSyncing] = useState(false);
+  const [syncError, setSyncError] = useState('');
+  const [toastMessage, setToastMessage] = useState('');
+
+  // Auth State
+  const [isAuthenticated, setIsAuthenticated] = useState(false);
+  const [authMode, setAuthMode] = useState('login'); // 'login' | 'signup' | 'reset'
+  const [authEmail, setAuthEmail] = useState('');
+  const [authPassword, setAuthPassword] = useState('');
+  const [authName, setAuthName] = useState('');
+  const [authTimezone, setAuthTimezone] = useState(DETECTED_TIMEZONE);
+  const [authGdprAccepted, setAuthGdprAccepted] = useState(false);
+  const [authError, setAuthError] = useState('');
+  const [authSuccess, setAuthSuccess] = useState('');
+  const [authLoading, setAuthLoading] = useState(false);
+
+  // App State
+  const [currentUserId, setCurrentUserId] = useState(null);
+  const [activeTab, setActiveTab] = useState('avail'); // 'avail' | 'groups' | 'privacy'
+  const [activeGroupId, setActiveGroupId] = useState(null);
+  const [groupTab, setGroupTab] = useState('ranked'); // 'ranked' | 'heatmap' | 'members'
+  const [slotDuration, setSlotDuration] = useState(60); // 60 | 30
+
+  // Week State
+  const [weekOffset, setWeekOffset] = useState(0);
+  const currentBaseUtc = CURRENT_MONDAY + weekOffset * 7 * 24 * 3600 * 1000;
+
+  // Heatmap Override
+  const [heatmapUserId, setHeatmapUserId] = useState(null);
+
+  // Group Creation State
+  const [isCreatingGroup, setIsCreatingGroup] = useState(false);
+  const [newGroupName, setNewGroupName] = useState('');
+  const [newGroupMembers, setNewGroupMembers] = useState([]);
+
+  // GDPR Account Deletion
+  const [confirmingDelete, setConfirmingDelete] = useState(false);
+  const [privacyNotice, setPrivacyNotice] = useState('');
+
+  // Quick Action Toggles
+  const [toggles, setToggles] = useState({ typical: false, weekend: false, custom: false });
+  const [customPreset, setCustomPreset] = useState([]);
+
+  const currentUser = cohort.find(u => u.id === currentUserId) || null;
+  const activeGroup = groups.find(g => g.id === activeGroupId) || null;
+
+  // Per-week timezone resolution
+  const getUserTimezoneForWeek = useCallback((userObj, weekMondayUtc) => {
+    if (!userObj) return DETECTED_TIMEZONE;
+    return weekTimezones[userObj.id]?.[weekMondayUtc] || userObj.timezone || DETECTED_TIMEZONE;
+  }, [weekTimezones]);
+
+  const currentWeekOverrideTz = currentUser ? (weekTimezones[currentUser.id]?.[currentBaseUtc] || null) : null;
+  const travelModeEnabled = Boolean(currentWeekOverrideTz);
+  const activeTimezone = currentWeekOverrideTz || currentUser?.timezone || DETECTED_TIMEZONE;
+
+  const showToast = (msg) => {
+    setToastMessage(msg);
+    setTimeout(() => setToastMessage(''), 3000);
+  };
+
+  // --- Cloud Sync Loader (Supabase REST) ---
+  const syncFromCloud = useCallback(async (showFeedback = false) => {
+    setIsSyncing(true);
+    setSyncError('');
+    try {
+      const [usersRows, groupsRows, availRows, meetingRows] = await Promise.all([
+        sbFetch('gemba_users?select=*'),
+        sbFetch('gemba_groups?select=*'),
+        sbFetch('gemba_availabilities?select=*'),
+        sbFetch('gemba_meetings?select=*'),
+      ]);
+
+      const mappedUsers = (usersRows || []).map(r => ({
+        id: r.id,
+        name: r.name,
+        email: r.email,
+        passwordHash: r.password_hash,
+        timezone: r.timezone,
+        gdprConsentAt: r.gdpr_consent_at,
+      }));
+      const mappedGroups = (groupsRows || []).map(r => ({
+        id: r.id,
+        name: r.name,
+        adminId: r.admin_id,
+        members: Array.isArray(r.members) ? r.members : [],
+      }));
+      const mappedAvail = {};
+      const mappedWeekTz = {};
+      (availRows || []).forEach(r => {
+        const ts = Number(r.utc_ts);
+        if (r.state === 'tz_override' || ts < 0) {
+          if (r.week_timezone) {
+            if (!mappedWeekTz[r.user_id]) mappedWeekTz[r.user_id] = {};
+            mappedWeekTz[r.user_id][Math.abs(ts)] = r.week_timezone;
+          }
+        } else {
+          if (!mappedAvail[r.user_id]) mappedAvail[r.user_id] = {};
+          mappedAvail[r.user_id][ts] = r.state;
+        }
+      });
+      const mappedMeetings = {};
+      (meetingRows || []).forEach(r => {
+        mappedMeetings[r.group_id] = {
+          utcTimestamp: Number(r.utc_ts),
+          members: Array.isArray(r.members) ? r.members : [],
+        };
+      });
+
+      setCohort(mappedUsers);
+      setGroups(mappedGroups);
+      setAvailabilities(mappedAvail);
+      setWeekTimezones(mappedWeekTz);
+      setConfirmedMeetings(mappedMeetings);
+
+      if (mappedUsers.length === 0 && !isAuthenticated) {
+        setAuthMode('signup');
+      }
+      if (showFeedback) {
+        showToast('Synced latest updates from EU Cloud.');
+      }
+    } catch {
+      setSyncError('Could not reach EU Cloud database. Tap Refresh to retry.');
+    } finally {
+      setIsSyncing(false);
+    }
+  }, [isAuthenticated]);
+
+  useEffect(() => {
+    syncFromCloud(false);
+    const interval = setInterval(() => syncFromCloud(false), 20000);
+    return () => clearInterval(interval);
+  }, [syncFromCloud]);
+
+  useEffect(() => {
+    if (!currentUser) return;
+    setHeatmapUserId(currentUser.id);
+    setConfirmingDelete(false);
+  }, [currentUser?.id]);
+
+  // Reset quick-action toggle labels when switching weeks
+  useEffect(() => {
+    setToggles({ typical: false, weekend: false, custom: false });
+  }, [weekOffset]);
+
+  // --- Save / Clear Per-Week Timezone Override ---
+  const setWeekTimezoneOverride = async (newTz) => {
+    if (!currentUser) return;
+    const sentinelTs = -currentBaseUtc;
+
+    setWeekTimezones(prev => {
+      const userMap = { ...(prev[currentUser.id] || {}) };
+      if (newTz) userMap[currentBaseUtc] = newTz;
+      else delete userMap[currentBaseUtc];
+      return { ...prev, [currentUser.id]: userMap };
+    });
+
+    try {
+      if (newTz) {
+        await sbFetch('gemba_availabilities', {
+          method: 'POST',
+          body: JSON.stringify([{
+            user_id: currentUser.id,
+            utc_ts: sentinelTs,
+            state: 'tz_override',
+            week_timezone: newTz,
+          }]),
+        });
+      } else {
+        await sbFetch(`gemba_availabilities?user_id=eq.${encodeURIComponent(currentUser.id)}&utc_ts=eq.${sentinelTs}`, {
+          method: 'DELETE',
+        });
+      }
+    } catch {
+      setSyncError('Could not save weekly timezone to EU Cloud.');
+    }
+  };
+
+  // --- ISO 8601 Week Formatting ---
+  const getIsoWeekInfo = (weekMondayUtc) => {
+    const thursday = new Date(weekMondayUtc + 3 * 24 * 3600 * 1000);
+    const isoYear = thursday.getUTCFullYear();
+    const yearStart = Date.UTC(isoYear, 0, 1);
+    const isoWeek = Math.ceil((((thursday.getTime() - yearStart) / 86400000) + 1) / 7);
+
+    const startD = new Date(weekMondayUtc);
+    const endD = new Date(weekMondayUtc + 6 * 24 * 3600 * 1000);
+    const startStr = startD.toLocaleDateString('en-US', { month: 'short', day: 'numeric', timeZone: 'UTC' });
+    const endStr = endD.toLocaleDateString('en-US', { month: 'short', day: 'numeric', timeZone: 'UTC' });
+
+    return {
+      isoWeek: isoWeek.toString().padStart(2, '0'),
+      range: `${startStr} – ${endStr}`,
+    };
+  };
+
+  const weekInfo = (() => {
+    const { isoWeek, range } = getIsoWeekInfo(currentBaseUtc);
+    const relative = weekOffset === 0 ? 'This Week' : weekOffset === 1 ? 'Next Week' : weekOffset === -1 ? 'Last Week' : null;
+    return {
+      primary: `W${isoWeek} • ${range}`,
+      relative,
+      full: relative ? `${relative} (W${isoWeek}: ${range})` : `W${isoWeek} (${range})`
+    };
+  })();
+
+  // --- Auth Handlers (@skema.edu enforced) ---
+  const validateSkemaEmail = (email) => /^[^\s@]+@skema\.edu$/.test(email.trim().toLowerCase());
+
+  const handleAuthSubmit = async (e) => {
+    e.preventDefault();
+    setAuthError('');
+    setAuthSuccess('');
+    const normalizedEmail = authEmail.trim().toLowerCase();
+
+    if (!validateSkemaEmail(normalizedEmail)) {
+      setAuthError('Access is restricted to valid @skema.edu email addresses.');
+      return;
+    }
+
+    setAuthLoading(true);
+    try {
+      const pwHash = await hashPassword(authPassword);
+
+      if (authMode === 'login') {
+        const existing = cohort.find(u => u.email.toLowerCase() === normalizedEmail);
+        if (!existing) {
+          setAuthError('No account found for this @skema.edu email. Please create an account first.');
+          return;
+        }
+        if (existing.passwordHash !== pwHash) {
+          setAuthError('Incorrect password. Try again or use "Forgot / Reset Password".');
+          return;
+        }
+        setCurrentUserId(existing.id);
+        setIsAuthenticated(true);
+        setAuthPassword('');
+      } else if (authMode === 'signup') {
+        if (!authName.trim()) {
+          setAuthError('Please enter your full name.');
+          return;
+        }
+        if (authPassword.length < 6) {
+          setAuthError('Password must be at least 6 characters long.');
+          return;
+        }
+        if (!authGdprAccepted) {
+          setAuthError('Please confirm your GDPR consent before creating an account.');
+          return;
+        }
+        if (cohort.some(u => u.email.toLowerCase() === normalizedEmail)) {
+          setAuthError('An account with this @skema.edu email already exists. Please sign in.');
+          return;
+        }
+        const newUser = {
+          id: 'u_' + Date.now() + '_' + Math.random().toString(36).slice(2, 6),
+          name: authName.trim(),
+          email: normalizedEmail,
+          passwordHash: pwHash,
+          timezone: authTimezone,
+          gdprConsentAt: new Date().toISOString().split('T')[0],
+        };
+
+        await sbFetch('gemba_users', {
+          method: 'POST',
+          body: JSON.stringify({
+            id: newUser.id,
+            name: newUser.name,
+            email: newUser.email,
+            password_hash: newUser.passwordHash,
+            timezone: newUser.timezone,
+            gdpr_consent_at: newUser.gdprConsentAt,
+          }),
+        });
+
+        setCohort(prev => [...prev, newUser]);
+        setAvailabilities(prev => ({ ...prev, [newUser.id]: {} }));
+        setCurrentUserId(newUser.id);
+        setIsAuthenticated(true);
+        setAuthPassword('');
+        setAuthName('');
+      } else if (authMode === 'reset') {
+        const existing = cohort.find(u => u.email.toLowerCase() === normalizedEmail);
+        if (!existing) {
+          setAuthError('No account found for this @skema.edu email.');
+          return;
+        }
+        if (authPassword.length < 6) {
+          setAuthError('New password must be at least 6 characters long.');
+          return;
+        }
+
+        await sbFetch(`gemba_users?id=eq.${encodeURIComponent(existing.id)}`, {
+          method: 'PATCH',
+          body: JSON.stringify({ password_hash: pwHash }),
+        });
+
+        setCohort(prev => prev.map(u => u.id === existing.id ? { ...u, passwordHash: pwHash } : u));
+        setAuthSuccess('Password updated! You can now sign in with your new password.');
+        setAuthPassword('');
+        setAuthMode('login');
+      }
+    } catch {
+      setAuthError('Could not save to EU Cloud database. Please try again.');
+    } finally {
+      setAuthLoading(false);
+    }
+  };
+
+  // --- Cloud Write Helper for Availability ---
+  const persistAvailabilityChanges = async (userId, upserts, deletes) => {
+    try {
+      if (upserts.length > 0) {
+        await sbFetch('gemba_availabilities', {
+          method: 'POST',
+          body: JSON.stringify(
+            upserts.map(({ utcTs, state }) => ({
+              user_id: userId,
+              utc_ts: utcTs,
+              state,
+              week_timezone: activeTimezone,
+            }))
+          ),
+        });
+      }
+      if (deletes.length > 0) {
+        const list = deletes.join(',');
+        await sbFetch(`gemba_availabilities?user_id=eq.${encodeURIComponent(userId)}&utc_ts=in.(${list})`, {
+          method: 'DELETE',
+        });
+      }
+    } catch {
+      setSyncError('Failed to save availability to EU Cloud. Tap Refresh to retry.');
+    }
+  };
+
+  // --- GDPR Export & Account Deletion ---
+  const handleExportMyData = () => {
+    if (!currentUser) return;
+    const myData = {
+      exportedAt: new Date().toISOString(),
+      profile: {
+        name: currentUser.name,
+        email: currentUser.email,
+        homeTimezone: currentUser.timezone,
+        gdprConsentDate: currentUser.gdprConsentAt || 'N/A',
+      },
+      weeklyTimezoneOverrides: Object.entries(weekTimezones[currentUser.id] || {}).map(([wkTs, tz]) => ({
+        weekStartingUtc: new Date(Number(wkTs)).toISOString().split('T')[0],
+        timezone: tz,
+      })),
+      groups: groups.filter(g => g.members.includes(currentUser.id)).map(g => g.name),
+      availabilitySlotsUtc: Object.entries(availabilities[currentUser.id] || {}).map(([ts, state]) => ({
+        utcIso: new Date(Number(ts)).toISOString(),
+        state,
+      })),
+    };
+    const blob = new Blob([JSON.stringify(myData, null, 2)], { type: 'application/json' });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.href = url;
+    a.download = `timesync-gemba-data-${currentUser.email.split('@')[0]}.json`;
+    a.click();
+    URL.revokeObjectURL(url);
+    setPrivacyNotice('Your personal data export (JSON) has been downloaded.');
+  };
+
+  const handleDeleteMyAccount = async () => {
+    if (!currentUser) return;
+    const idToDelete = currentUser.id;
+    try {
+      await sbFetch(`gemba_availabilities?user_id=eq.${encodeURIComponent(idToDelete)}`, { method: 'DELETE' });
+      await sbFetch(`gemba_users?id=eq.${encodeURIComponent(idToDelete)}`, { method: 'DELETE' });
+      const affectedGroups = groups.filter(g => g.members.includes(idToDelete));
+      await Promise.all(
+        affectedGroups.map(g =>
+          sbFetch(`gemba_groups?id=eq.${encodeURIComponent(g.id)}`, {
+            method: 'PATCH',
+            body: JSON.stringify({ members: g.members.filter(mId => mId !== idToDelete) }),
+          })
+        )
+      );
+    } catch {
+      setPrivacyNotice('Could not complete cloud deletion. Please try again.');
+      return;
+    }
+
+    setAvailabilities(prev => {
+      const next = { ...prev };
+      delete next[idToDelete];
+      return next;
+    });
+    setWeekTimezones(prev => {
+      const next = { ...prev };
+      delete next[idToDelete];
+      return next;
+    });
+    setGroups(prev => prev.map(g => ({
+      ...g,
+      members: g.members.filter(mId => mId !== idToDelete)
+    })));
+    setConfirmedMeetings(prev => {
+      const next = {};
+      for (const [gId, m] of Object.entries(prev)) {
+        next[gId] = { ...m, members: m.members.filter(mId => mId !== idToDelete) };
+      }
+      return next;
+    });
+    const remaining = cohort.filter(u => u.id !== idToDelete);
+    setCohort(remaining);
+    setCurrentUserId(null);
+    setActiveGroupId(null);
+    setConfirmingDelete(false);
+    setIsAuthenticated(false);
+    setAuthMode(remaining.length === 0 ? 'signup' : 'login');
+    setAuthSuccess('Your account and all associated scheduling data have been permanently deleted.');
+  };
+
+  // --- Scheduling & Grid Helpers ---
+  const getUserConfirmedMeeting = (userId, utcTimestamp) => {
+    for (const [groupId, meeting] of Object.entries(confirmedMeetings)) {
+      if (meeting.utcTimestamp === utcTimestamp && meeting.members.includes(userId)) {
+        return groups.find(g => g.id === groupId);
+      }
+    }
+    return null;
+  };
+
+  const generateGrid = (timeZone, baseUtc, durationMin = 60) => {
+    const grid = [];
+    const minsList = durationMin === 30 ? [0, 30] : [0];
+    for (let dayIdx = 0; dayIdx < 7; dayIdx++) {
+      const dayDate = new Date(baseUtc + dayIdx * 24 * 3600 * 1000);
+      const y = dayDate.getUTCFullYear();
+      const m = dayDate.getUTCMonth();
+      const dt = dayDate.getUTCDate();
+      const slots = [];
+      GRID_HOURS.forEach(h => {
+        minsList.forEach(min => {
+          slots.push({
+            localHour: h,
+            localMinute: min,
+            label: `${h.toString().padStart(2, '0')}:${min.toString().padStart(2, '0')}`,
+            utcTimestamp: localToUtcMs(y, m, dt, h, min, timeZone),
+          });
+        });
+      });
+      grid.push({ dayName: DAYS[dayIdx], dateStr: dt, slots });
+    }
+    return grid;
+  };
+
+  const cycleState = (utcTimestamp) => {
+    if (!currentUser) return;
+    if (getUserConfirmedMeeting(currentUser.id, utcTimestamp)) return;
+    const current = availabilities[currentUser.id]?.[utcTimestamp] || 'unavailable';
+    let nextState = null;
+    if (current === 'unavailable') nextState = 'available';
+    else if (current === 'available') nextState = 'preferred';
+
+    setAvailabilities(prev => {
+      const userAvail = { ...(prev[currentUser.id] || {}) };
+      if (nextState) userAvail[utcTimestamp] = nextState;
+      else delete userAvail[utcTimestamp];
+      return { ...prev, [currentUser.id]: userAvail };
+    });
+
+    if (nextState) {
+      persistAvailabilityChanges(currentUser.id, [{ utcTs: utcTimestamp, state: nextState }], []);
+    } else {
+      persistAvailabilityChanges(currentUser.id, [], [utcTimestamp]);
+    }
+  };
+
+  const applyLocalPattern = (conditionFn, isAdding) => {
+    if (!currentUser) return;
+    const grid = generateGrid(activeTimezone, currentBaseUtc, slotDuration);
+    const upserts = [];
+    const deletes = [];
+
+    setAvailabilities(prev => {
+      const userAvail = { ...(prev[currentUser.id] || {}) };
+      grid.forEach((day, dayIdx) => {
+        day.slots.forEach(slot => {
+          if (conditionFn(dayIdx, slot.localHour)) {
+            if (isAdding) {
+              userAvail[slot.utcTimestamp] = 'available';
+              upserts.push({ utcTs: slot.utcTimestamp, state: 'available' });
+            } else {
+              delete userAvail[slot.utcTimestamp];
+              deletes.push(slot.utcTimestamp);
+            }
+          }
+        });
+      });
+      return { ...prev, [currentUser.id]: userAvail };
+    });
+
+    persistAvailabilityChanges(currentUser.id, upserts, deletes);
+  };
+
+  const clearWeek = () => {
+    if (!currentUser) return;
+    const grid = generateGrid(activeTimezone, currentBaseUtc, 30);
+    const deletes = [];
+    setAvailabilities(prev => {
+      const userAvail = { ...(prev[currentUser.id] || {}) };
+      grid.forEach(day => {
+        day.slots.forEach(slot => {
+          if (userAvail[slot.utcTimestamp]) {
+            delete userAvail[slot.utcTimestamp];
+            deletes.push(slot.utcTimestamp);
+          }
+        });
+      });
+      return { ...prev, [currentUser.id]: userAvail };
+    });
+    setToggles({ typical: false, weekend: false, custom: false });
+    persistAvailabilityChanges(currentUser.id, [], deletes);
+  };
+
+  const isFriSatWeekend = FRI_SAT_WEEKEND_ZONES.has(activeTimezone);
+
+  const toggleTypical = () => {
+    const isAdding = !toggles.typical;
+    applyLocalPattern((dayIdx, h) => {
+      const isWeekend = isFriSatWeekend ? (dayIdx === 4 || dayIdx === 5) : (dayIdx === 5 || dayIdx === 6);
+      return !isWeekend && h >= 18 && h < 22;
+    }, isAdding);
+    setToggles(prev => ({ ...prev, typical: isAdding }));
+  };
+
+  const toggleWeekend = () => {
+    const isAdding = !toggles.weekend;
+    applyLocalPattern((dayIdx, h) => {
+      const isWeekend = isFriSatWeekend ? (dayIdx === 4 || dayIdx === 5) : (dayIdx === 5 || dayIdx === 6);
+      return isWeekend && h >= 9 && h < 17;
+    }, isAdding);
+    setToggles(prev => ({ ...prev, weekend: isAdding }));
+  };
+
+  const toggleCustom = () => {
+    if (!currentUser || customPreset.length === 0) return;
+    const isAdding = !toggles.custom;
+    const grid = generateGrid(activeTimezone, currentBaseUtc, slotDuration);
+    const upserts = [];
+    const deletes = [];
+
+    setAvailabilities(prev => {
+      const userAvail = { ...(prev[currentUser.id] || {}) };
+      customPreset.forEach(({ dayIdx, hour, minute }) => {
+        const slot = grid[dayIdx]?.slots.find(s => s.localHour === hour && s.localMinute === minute);
+        if (slot) {
+          if (isAdding) {
+            userAvail[slot.utcTimestamp] = 'available';
+            upserts.push({ utcTs: slot.utcTimestamp, state: 'available' });
+          } else {
+            delete userAvail[slot.utcTimestamp];
+            deletes.push(slot.utcTimestamp);
+          }
+        }
+      });
+      return { ...prev, [currentUser.id]: userAvail };
+    });
+    setToggles(prev => ({ ...prev, custom: isAdding }));
+    persistAvailabilityChanges(currentUser.id, upserts, deletes);
+  };
+
+  const saveCustomPreset = () => {
+    if (!currentUser) return;
+    const userAvail = availabilities[currentUser.id] || {};
+    const grid = generateGrid(activeTimezone, currentBaseUtc, slotDuration);
+    const saved = [];
+    grid.forEach((day, dayIdx) => {
+      day.slots.forEach(slot => {
+        if (userAvail[slot.utcTimestamp] && userAvail[slot.utcTimestamp] !== 'unavailable') {
+          saved.push({ dayIdx, hour: slot.localHour, minute: slot.localMinute });
+        }
+      });
+    });
+    setCustomPreset(saved);
+    setToggles(prev => ({ ...prev, custom: true }));
+    showToast('Custom preset saved!');
+  };
+
+  const handleCreateGroup = async () => {
+    if (!currentUser || !newGroupName.trim() || newGroupMembers.length === 0) return;
+    const newGroup = {
+      id: 'g_' + Date.now() + '_' + Math.random().toString(36).slice(2, 5),
+      name: newGroupName.trim(),
+      adminId: currentUser.id,
+      members: newGroupMembers,
+    };
+
+    try {
+      await sbFetch('gemba_groups', {
+        method: 'POST',
+        body: JSON.stringify({
+          id: newGroup.id,
+          name: newGroup.name,
+          admin_id: newGroup.adminId,
+          members: newGroup.members,
+        }),
+      });
+      setGroups(prev => [...prev, newGroup]);
+      setIsCreatingGroup(false);
+      setNewGroupName('');
+      setNewGroupMembers([currentUser.id]);
+      showToast(`Group "${newGroup.name}" created!`);
+    } catch {
+      setSyncError('Could not save group to EU Cloud.');
+    }
+  };
+
+  const handleConfirmMeeting = async (group, utcTimestamp) => {
+    const meetingData = { utcTimestamp, members: group.members };
+    try {
+      await sbFetch('gemba_meetings', {
+        method: 'POST',
+        body: JSON.stringify({
+          group_id: group.id,
+          utc_ts: utcTimestamp,
+          members: group.members,
+        }),
+      });
+      setConfirmedMeetings(prev => ({ ...prev, [group.id]: meetingData }));
+      showToast('Meeting slot locked across all groups!');
+    } catch {
+      setSyncError('Could not confirm meeting in EU Cloud.');
+    }
+  };
+
+  const handleUnconfirmMeeting = async (groupId) => {
+    try {
+      await sbFetch(`gemba_meetings?group_id=eq.${encodeURIComponent(groupId)}`, {
+        method: 'DELETE',
+      });
+      setConfirmedMeetings(prev => {
+        const next = { ...prev };
+        delete next[groupId];
+        return next;
+      });
+      showToast('Meeting unlocked for re-scheduling.');
+    } catch {
+      setSyncError('Could not unconfirm meeting in EU Cloud.');
+    }
+  };
+
+  const handleCopyInviteLink = () => {
+    const url = typeof window !== 'undefined' ? window.location.href : '';
+    const copied = copyTextSafe(url);
+    showToast(copied ? 'App link copied! Share it with your GEMBA teammates.' : 'Share this page URL with your GEMBA teammates.');
+  };
+
+  const formatTimeForZoneFull = (utcTimestamp, timeZone) => {
+    const p = getLocalParts(utcTimestamp, timeZone);
+    return `${p.weekday}, ${p.month} ${p.day} • ${p.hourStr}:${p.minuteStr} ${p.tzAbbr}`;
+  };
+
+  const formatTimeForZoneShort = (utcTimestamp, timeZone) => {
+    const p = getLocalParts(utcTimestamp, timeZone);
+    return `${p.hourStr}:${p.minuteStr} ${p.tzAbbr}`;
+  };
+
+  // --- Overlap Engine (uses each member's timezone for the active week) ---
+  const { rankedSlots, heatmapData } = useMemo(() => {
+    if (!activeGroup) return { rankedSlots: [], heatmapData: {} };
+
+    const availableSlots = [];
+    const hMap = {};
+
+    const startUtc = currentBaseUtc - 14 * 3600 * 1000;
+    const endUtc = currentBaseUtc + (7 * 24 + 14) * 3600 * 1000;
+    const minNeeded = activeGroup.members.length <= 1 ? 1 : 2;
+    const stepMs = 1800 * 1000;
+
+    for (let utcTimestamp = startUtc; utcTimestamp < endUtc; utcTimestamp += stepMs) {
+      let totalFree = 0;
+      let preferredCount = 0;
+      let badHourPenalty = 0;
+
+      const memberStatuses = activeGroup.members
+        .map(memberId => cohort.find(u => u.id === memberId))
+        .filter(Boolean)
+        .map(userObj => {
+          let state = availabilities[userObj.id]?.[utcTimestamp] || 'unavailable';
+          if (getUserConfirmedMeeting(userObj.id, utcTimestamp)) {
+            state = 'blocked';
+          }
+
+          const memberWeekTz = getUserTimezoneForWeek(userObj, currentBaseUtc);
+          const local = getLocalParts(utcTimestamp, memberWeekTz);
+          const isBadHour = local.hourNum >= 23 || local.hourNum < 6;
+
+          if (state === 'available' || state === 'preferred') {
+            totalFree++;
+            if (state === 'preferred') preferredCount++;
+            if (isBadHour) badHourPenalty++;
+          }
+
+          return { user: userObj, memberWeekTz, state, localHour: local.hourNum, isBadHour };
+        });
+
+      hMap[utcTimestamp] = totalFree;
+
+      const inCurrentWeek = utcTimestamp >= currentBaseUtc && utcTimestamp < currentBaseUtc + 7 * 24 * 3600 * 1000;
+      if (inCurrentWeek && totalFree >= minNeeded) {
+        availableSlots.push({
+          utcTimestamp,
+          totalFree,
+          preferredCount,
+          totalMembers: memberStatuses.length,
+          badHourPenalty,
+          memberStatuses,
+        });
+      }
+    }
+
+    const sorted = availableSlots
+      .sort((a, b) => {
+        if (b.totalFree !== a.totalFree) return b.totalFree - a.totalFree;
+        if (b.preferredCount !== a.preferredCount) return b.preferredCount - a.preferredCount;
+        return a.badHourPenalty - b.badHourPenalty;
+      })
+      .slice(0, 10);
+
+    return { rankedSlots: sorted, heatmapData: hMap };
+  }, [activeGroup, cohort, availabilities, confirmedMeetings, currentBaseUtc, getUserTimezoneForWeek]);
+
+  // --- LOGIN / SIGNUP / RESET PORTAL ---
+  if (!isAuthenticated || !currentUser) {
+    return (
+      <div className="min-h-screen bg-slate-100 flex flex-col items-center justify-center p-4 font-sans">
+        <div className="w-full max-w-md bg-white rounded-2xl shadow-xl border border-slate-200 overflow-hidden">
+          <div className="bg-slate-900 text-white p-6 text-center">
+            <div className="w-12 h-12 bg-indigo-600 rounded-xl flex items-center justify-center mx-auto mb-3 shadow-md">
+              <Globe className="w-6 h-6 text-white" />
+            </div>
+            <h1 className="text-2xl font-bold tracking-tight">TimeSync GEMBA</h1>
+            <p className="text-slate-400 text-xs mt-1">SKEMA GEMBA Cross-Timezone Scheduler</p>
+            <div className="mt-3 inline-flex items-center gap-1.5 text-[10px] font-semibold px-2.5 py-1 rounded-full bg-slate-800 text-emerald-300 border border-slate-700">
+              <Cloud className="w-3 h-3" />
+              EU Cloud Synced (Paris)
+            </div>
+          </div>
+
+          <div className="flex border-b border-slate-200 bg-slate-50 text-sm font-semibold">
+            <button
+              type="button"
+              onClick={() => { setAuthMode('login'); setAuthError(''); setAuthSuccess(''); }}
+              className={`flex-1 py-3 transition-colors ${authMode === 'login' ? 'text-indigo-600 border-b-2 border-indigo-600 bg-white' : 'text-slate-500 hover:text-slate-700'}`}
+            >
+              Sign In
+            </button>
+            <button
+              type="button"
+              onClick={() => { setAuthMode('signup'); setAuthError(''); setAuthSuccess(''); }}
+              className={`flex-1 py-3 transition-colors ${authMode === 'signup' ? 'text-indigo-600 border-b-2 border-indigo-600 bg-white' : 'text-slate-500 hover:text-slate-700'}`}
+            >
+              Create Account
+            </button>
+          </div>
+
+          <form onSubmit={handleAuthSubmit} className="p-6 flex flex-col gap-4">
+            {authError && (
+              <div className="bg-red-50 border border-red-200 text-red-700 text-xs p-3 rounded-lg flex items-start gap-2">
+                <AlertCircle className="w-4 h-4 shrink-0 mt-0.5" />
+                <span>{authError}</span>
+              </div>
+            )}
+            {authSuccess && (
+              <div className="bg-emerald-50 border border-emerald-200 text-emerald-700 text-xs p-3 rounded-lg flex items-start gap-2">
+                <Check className="w-4 h-4 shrink-0 mt-0.5" />
+                <span>{authSuccess}</span>
+              </div>
+            )}
+
+            {authMode === 'reset' && (
+              <div className="text-xs text-slate-600 bg-indigo-50 border border-indigo-100 p-3 rounded-lg">
+                Enter your <strong>@skema.edu</strong> email and choose a new password to reset your access.
+              </div>
+            )}
+
+            {authMode === 'signup' && (
+              <div>
+                <label className="block text-xs font-semibold text-slate-700 mb-1">Full Name</label>
+                <input
+                  type="text"
+                  required
+                  placeholder="e.g. Firstname Lastname"
+                  value={authName}
+                  onChange={(e) => setAuthName(e.target.value)}
+                  className="w-full p-2.5 text-sm border border-slate-300 rounded-lg focus:ring-2 focus:ring-indigo-500 outline-none"
+                />
+              </div>
+            )}
+
+            <div>
+              <label className="block text-xs font-semibold text-slate-700 mb-1">SKEMA Email (@skema.edu required)</label>
+              <div className="relative">
+                <Mail className="w-4 h-4 text-slate-400 absolute left-3 top-3" />
+                <input
+                  type="email"
+                  required
+                  placeholder="firstname.lastname@skema.edu"
+                  value={authEmail}
+                  onChange={(e) => setAuthEmail(e.target.value)}
+                  className="w-full pl-9 pr-3 py-2.5 text-sm border border-slate-300 rounded-lg focus:ring-2 focus:ring-indigo-500 outline-none"
+                />
+              </div>
+            </div>
+
+            <div>
+              <label className="block text-xs font-semibold text-slate-700 mb-1">
+                {authMode === 'reset' ? 'New Password' : 'Password'}
+              </label>
+              <div className="relative">
+                <Lock className="w-4 h-4 text-slate-400 absolute left-3 top-3" />
+                <input
+                  type="password"
+                  required
+                  placeholder={authMode === 'login' ? 'Enter password' : 'Min. 6 characters'}
+                  value={authPassword}
+                  onChange={(e) => setAuthPassword(e.target.value)}
+                  className="w-full pl-9 pr-3 py-2.5 text-sm border border-slate-300 rounded-lg focus:ring-2 focus:ring-indigo-500 outline-none"
+                />
+              </div>
+            </div>
+
+            {authMode === 'signup' && (
+              <>
+                <div>
+                  <label className="block text-xs font-semibold text-slate-700 mb-1">
+                    Home Timezone (Standard IANA • DST Automatic)
+                  </label>
+                  <TimezonePicker
+                    value={authTimezone}
+                    onChange={setAuthTimezone}
+                    refUtcMs={currentBaseUtc}
+                  />
+                </div>
+
+                <label className="flex items-start gap-2.5 text-xs text-slate-600 cursor-pointer bg-slate-50 p-3 rounded-lg border border-slate-200">
+                  <input
+                    type="checkbox"
+                    checked={authGdprAccepted}
+                    onChange={(e) => setAuthGdprAccepted(e.target.checked)}
+                    className="mt-0.5 rounded border-slate-300 text-indigo-600 focus:ring-indigo-500"
+                  />
+                  <span>
+                    <strong>GDPR Consent:</strong> Independent student tool hosted in EU (Paris). I consent to share my name, @skema.edu email, broad IANA timezone, and weekly availability with my GEMBA cohort. I can export or delete my account anytime.
+                  </span>
+                </label>
+              </>
+            )}
+
+            <button
+              type="submit"
+              disabled={authLoading}
+              className="w-full py-3 bg-indigo-600 hover:bg-indigo-700 disabled:opacity-60 text-white font-semibold rounded-lg shadow-sm transition-colors flex items-center justify-center gap-2 text-sm mt-1"
+            >
+              {authMode === 'login' && <><Lock className="w-4 h-4" /> {authLoading ? 'Signing in...' : 'Sign In'}</>}
+              {authMode === 'signup' && <><UserPlus className="w-4 h-4" /> {authLoading ? 'Creating account...' : 'Join GEMBA Cohort'}</>}
+              {authMode === 'reset' && <><KeyRound className="w-4 h-4" /> {authLoading ? 'Updating...' : 'Reset Password'}</>}
+            </button>
+
+            <div className="flex items-center justify-between text-xs pt-1">
+              {authMode === 'login' ? (
+                <button
+                  type="button"
+                  onClick={() => { setAuthMode('reset'); setAuthError(''); setAuthSuccess(''); }}
+                  className="text-indigo-600 hover:underline font-medium"
+                >
+                  Forgot / Reset Password?
+                </button>
+              ) : (
+                <button
+                  type="button"
+                  onClick={() => { setAuthMode('login'); setAuthError(''); setAuthSuccess(''); }}
+                  className="text-slate-500 hover:text-slate-800 font-medium"
+                >
+                  ← Back to Sign In
+                </button>
+              )}
+              <span className="text-slate-400 flex items-center gap-1">
+                <ShieldCheck className="w-3.5 h-3.5" /> GDPR Compliant
+              </span>
+            </div>
+          </form>
+        </div>
+      </div>
+    );
+  }
+
+  const isGroupAdmin = activeGroup ? (!activeGroup.adminId || activeGroup.adminId === currentUser.id) : false;
+
+  // --- MAIN APP SHELL ---
+  return (
+    <div className="min-h-screen bg-slate-50 text-slate-800 font-sans flex flex-col max-w-3xl mx-auto shadow-xl relative">
+      {toastMessage && (
+        <div className="fixed top-4 left-1/2 -translate-x-1/2 z-50 bg-slate-900 text-white text-xs font-semibold px-4 py-2.5 rounded-full shadow-lg flex items-center gap-2">
+          <Check className="w-4 h-4 text-emerald-400" />
+          <span>{toastMessage}</span>
+        </div>
+      )}
+
+      <header className="bg-slate-900 text-white p-4 flex justify-between items-center shrink-0 z-20 gap-2">
+        <div className="min-w-0">
+          <div className="flex items-center gap-2">
+            <h1 className="font-bold text-lg tracking-tight truncate">TimeSync GEMBA</h1>
+            <span className="inline-flex items-center gap-1 text-[10px] font-semibold px-2 py-0.5 rounded-full bg-emerald-500/20 text-emerald-300 border border-emerald-500/30 shrink-0">
+              <span className="w-1.5 h-1.5 rounded-full bg-emerald-400"></span>
+              EU Cloud Synced
+            </span>
+          </div>
+          <p className="text-slate-400 text-xs truncate">
+            Signed in as <span className="text-slate-200 font-medium">{currentUser.name}</span>
+          </p>
+        </div>
+        <div className="flex items-center gap-2 shrink-0">
+          <button
+            onClick={() => syncFromCloud(true)}
+            disabled={isSyncing}
+            title="Refresh latest cohort updates"
+            className="p-2 bg-slate-800 hover:bg-slate-700 text-slate-300 hover:text-white rounded transition-colors flex items-center gap-1 text-xs"
+          >
+            <RefreshCw className={`w-4 h-4 ${isSyncing ? 'animate-spin text-indigo-400' : ''}`} />
+            <span className="hidden sm:inline">Refresh</span>
+          </button>
+          <button
+            onClick={handleCopyInviteLink}
+            title="Copy invite link for teammates"
+            className="p-2 bg-slate-800 hover:bg-slate-700 text-slate-300 hover:text-white rounded transition-colors flex items-center gap-1 text-xs"
+          >
+            <Share2 className="w-4 h-4" />
+            <span className="hidden sm:inline">Invite</span>
+          </button>
+          <button
+            onClick={() => { setIsAuthenticated(false); setActiveGroupId(null); }}
+            title="Sign Out"
+            className="p-2 bg-slate-800 hover:bg-slate-700 text-slate-300 hover:text-white rounded transition-colors"
+          >
+            <LogOut className="w-4 h-4" />
+          </button>
+        </div>
+      </header>
+
+      {syncError && (
+        <div className="bg-red-50 border-b border-red-200 text-red-700 text-xs px-4 py-2 flex items-center justify-between">
+          <span className="flex items-center gap-1.5"><AlertCircle className="w-4 h-4 shrink-0" /> {syncError}</span>
+          <button onClick={() => setSyncError('')} className="text-red-500 hover:text-red-800"><X className="w-4 h-4" /></button>
+        </div>
+      )}
+
+      {/* Global ISO 8601 Week Navigator */}
+      <div className="bg-slate-800 text-slate-200 px-4 py-2.5 flex items-center justify-between text-sm shadow-inner z-10 shrink-0 border-t border-slate-700">
+        <button onClick={() => setWeekOffset(w => w - 1)} className="px-2 py-1 hover:bg-slate-700 hover:text-white rounded flex items-center gap-1 transition-colors">
+          <ChevronLeft className="w-4 h-4" /> Prev
+        </button>
+        <div className="flex flex-col sm:flex-row items-center gap-1 sm:gap-2 text-center">
+          <div className="font-semibold text-white flex items-center gap-1.5">
+            <Calendar className="w-4 h-4 text-indigo-400" />
+            <span>{weekInfo.primary}</span>
+          </div>
+          {weekInfo.relative && (
+            <span className="text-[10px] font-bold uppercase tracking-wider bg-indigo-500/30 text-indigo-200 px-2 py-0.5 rounded-full border border-indigo-400/30">
+              {weekInfo.relative}
+            </span>
+          )}
+        </div>
+        <button onClick={() => setWeekOffset(w => w + 1)} className="px-2 py-1 hover:bg-slate-700 hover:text-white rounded flex items-center gap-1 transition-colors">
+          Next <ChevronRight className="w-4 h-4" />
+        </button>
+      </div>
+
+      {/* TAB 1: MY AVAIL */}
+      {activeTab === 'avail' && (
+        <div className="flex-1 flex flex-col overflow-hidden bg-white">
+          <div className="bg-blue-50 border-b border-blue-100 p-3 px-4 flex flex-col gap-2 shrink-0">
+            <div className="flex items-center justify-between gap-2">
+              <div className="flex items-center gap-1.5 text-blue-900 font-semibold text-xs sm:text-sm">
+                <MapPin className="w-4 h-4 text-blue-600 shrink-0" />
+                <span>
+                  {travelModeEnabled
+                    ? `Traveling (${weekInfo.primary.split(' • ')[0]}): ${activeTimezone.replace(/_/g, ' ')}`
+                    : `Home: ${currentUser.timezone.replace(/_/g, ' ')}`}
+                </span>
+              </div>
+              <label className="inline-flex items-center gap-2 cursor-pointer text-xs font-semibold text-blue-800 shrink-0">
+                <span>Travel this week</span>
+                <input
+                  type="checkbox"
+                  checked={travelModeEnabled}
+                  onChange={(e) => {
+                    const checked = e.target.checked;
+                    if (checked) setWeekTimezoneOverride(currentUser.timezone);
+                    else setWeekTimezoneOverride(null);
+                  }}
+                  className="rounded border-blue-300 text-indigo-600 focus:ring-indigo-500"
+                />
+              </label>
+            </div>
+            {travelModeEnabled && (
+              <TimezonePicker
+                value={activeTimezone}
+                onChange={(tz) => setWeekTimezoneOverride(tz)}
+                refUtcMs={currentBaseUtc}
+                compact
+              />
+            )}
+          </div>
+
+          <div className="p-3 sm:p-4 border-b border-slate-100 shrink-0 bg-slate-50">
+            <div className="flex flex-wrap gap-2 items-center">
+              <button
+                onClick={toggleTypical}
+                className={`px-3 py-1.5 rounded-full text-xs font-medium transition-colors border shadow-sm ${toggles.typical ? 'bg-blue-600 text-white border-blue-600' : 'bg-white text-slate-600 border-slate-200 hover:bg-slate-100'}`}
+              >
+                Typical Week {toggles.typical ? '(Remove)' : '(Add)'}
+              </button>
+              <button
+                onClick={toggleWeekend}
+                className={`px-3 py-1.5 rounded-full text-xs font-medium transition-colors border shadow-sm ${toggles.weekend ? 'bg-blue-600 text-white border-blue-600' : 'bg-white text-slate-600 border-slate-200 hover:bg-slate-100'}`}
+              >
+                {isFriSatWeekend ? 'Fri–Sat Weekend' : 'Weekend'} {toggles.weekend ? '(Remove)' : '(Add)'}
+              </button>
+
+              <div className="flex items-center gap-1">
+                <button
+                  onClick={toggleCustom}
+                  disabled={customPreset.length === 0}
+                  className={`px-3 py-1.5 rounded-full text-xs font-medium transition-colors border shadow-sm ${customPreset.length === 0 ? 'opacity-50 cursor-not-allowed bg-slate-100 text-slate-400' : toggles.custom ? 'bg-indigo-600 text-white border-indigo-600' : 'bg-white text-slate-600 border-slate-200 hover:bg-slate-100'}`}
+                >
+                  Custom Preset {customPreset.length > 0 ? (toggles.custom ? '(Remove)' : '(Add)') : '(Empty)'}
+                </button>
+                <button
+                  onClick={saveCustomPreset}
+                  title="Save current week as custom preset"
+                  className="px-2.5 py-1.5 rounded-full bg-white border border-slate-200 text-slate-600 hover:text-indigo-600 hover:bg-indigo-50 shadow-sm transition-colors text-xs font-medium flex items-center gap-1"
+                >
+                  <Save className="w-3.5 h-3.5" /> Save Preset
+                </button>
+              </div>
+
+              <button
+                onClick={clearWeek}
+                className="px-3 py-1.5 rounded-full text-xs font-medium bg-white text-red-600 border border-red-200 hover:bg-red-50 shadow-sm transition-colors ml-auto flex items-center gap-1"
+              >
+                <Trash2 className="w-3 h-3" /> Clear All
+              </button>
+            </div>
+
+            <div className="flex flex-wrap items-center justify-between gap-2 mt-3 text-[11px] text-slate-500">
+              <div className="flex items-center gap-4">
+                <span className="flex items-center gap-1"><span className="w-3 h-3 rounded-sm bg-blue-400 inline-block"></span> Available</span>
+                <span className="flex items-center gap-1"><span className="w-3 h-3 rounded-sm bg-indigo-700 inline-block"></span> Preferred</span>
+                <span className="flex items-center gap-1"><span className="w-3 h-3 rounded-sm bg-emerald-500 inline-block"></span> Confirmed</span>
+              </div>
+              <div className="inline-flex rounded-lg border border-slate-200 bg-white p-0.5 text-[11px] font-semibold">
+                <button
+                  onClick={() => setSlotDuration(60)}
+                  className={`px-2.5 py-1 rounded-md transition-colors ${slotDuration === 60 ? 'bg-indigo-600 text-white' : 'text-slate-500 hover:text-slate-800'}`}
+                >
+                  1h Slots
+                </button>
+                <button
+                  onClick={() => setSlotDuration(30)}
+                  className={`px-2.5 py-1 rounded-md transition-colors ${slotDuration === 30 ? 'bg-indigo-600 text-white' : 'text-slate-500 hover:text-slate-800'}`}
+                >
+                  30m Slots
+                </button>
+              </div>
+            </div>
+          </div>
+
+          <main className="flex-1 overflow-auto bg-white relative">
+            <div className={`${slotDuration === 30 ? 'min-w-[1200px]' : 'min-w-[740px]'} h-full flex flex-col`}>
+              <div className="flex sticky top-0 bg-slate-50 border-b border-slate-200 z-10">
+                <div className="w-16 flex-none border-r border-slate-200"></div>
+                <div className="flex-1 flex text-[10px] text-slate-400 uppercase tracking-wider font-semibold">
+                  {GRID_HOURS.map(h => (
+                    <div key={h} className="flex-1 text-center py-2 border-r border-slate-100">
+                      {h.toString().padStart(2, '0')}
+                    </div>
+                  ))}
+                </div>
+              </div>
+
+              <div className="flex-1 flex flex-col pb-4">
+                {generateGrid(activeTimezone, currentBaseUtc, slotDuration).map(day => (
+                  <div key={day.dayName} className="flex flex-1 min-h-[48px] border-b border-slate-100">
+                    <div className="w-16 flex-none flex flex-col items-center justify-center font-medium text-slate-500 border-r border-slate-200 bg-slate-50 sticky left-0 z-10">
+                      <span className="text-sm leading-tight">{day.dayName}</span>
+                      <span className="text-[10px] text-slate-400">{day.dateStr}</span>
+                    </div>
+                    <div className="flex-1 flex gap-0.5 pt-0.5 px-0.5">
+                      {day.slots.map(slot => {
+                        const state = availabilities[currentUser.id]?.[slot.utcTimestamp] || 'unavailable';
+                        const confirmedGroup = getUserConfirmedMeeting(currentUser.id, slot.utcTimestamp);
+
+                        let bgColor = 'bg-white border-slate-200';
+                        if (confirmedGroup) bgColor = 'bg-emerald-500 border-emerald-600 flex items-center justify-center text-white';
+                        else if (state === 'available') bgColor = 'bg-blue-400 border-blue-400';
+                        else if (state === 'preferred') bgColor = 'bg-indigo-700 border-indigo-700';
+
+                        return (
+                          <div
+                            key={slot.utcTimestamp}
+                            title={confirmedGroup ? `Confirmed Meeting: ${confirmedGroup.name}` : `${day.dayName} ${slot.label}`}
+                            onPointerDown={() => cycleState(slot.utcTimestamp)}
+                            className={`flex-1 h-10 border rounded-sm cursor-pointer transition-colors hover:brightness-95 active:scale-95 ${bgColor}`}
+                          >
+                            {confirmedGroup && <Check className="w-3.5 h-3.5 m-auto" strokeWidth={3} />}
+                          </div>
+                        );
+                      })}
+                    </div>
+                  </div>
+                ))}
+              </div>
+            </div>
+          </main>
+        </div>
+      )}
+
+      {/* TAB 2: GROUPS LIST */}
+      {activeTab === 'groups' && !activeGroup && !isCreatingGroup && (
+        <div className="flex-1 overflow-auto bg-slate-50 p-4">
+          <div className="flex justify-between items-center mb-6">
+            <div>
+              <h2 className="text-xl font-bold text-slate-800">My GEMBA Study Groups</h2>
+              <p className="text-xs text-slate-500 mt-0.5">{cohort.length} registered cohort {cohort.length === 1 ? 'member' : 'members'}</p>
+            </div>
+            <button
+              onClick={() => {
+                setNewGroupMembers([currentUser.id]);
+                setIsCreatingGroup(true);
+              }}
+              className="bg-indigo-600 hover:bg-indigo-700 text-white px-4 py-2 rounded-lg text-sm font-semibold shadow-sm transition-colors flex items-center gap-2"
+            >
+              <Plus className="w-4 h-4" /> New Group
+            </button>
+          </div>
+          <div className="flex flex-col gap-3">
+            {groups.map(group => {
+              if (!group.members.includes(currentUser.id)) return null;
+              const confirmed = confirmedMeetings[group.id];
+
+              return (
+                <div
+                  key={group.id}
+                  onClick={() => { setActiveGroupId(group.id); setGroupTab('ranked'); }}
+                  className="bg-white p-5 rounded-xl border border-slate-200 shadow-sm hover:shadow-md cursor-pointer transition-all active:scale-[0.98] flex items-center justify-between"
+                >
+                  <div>
+                    <h3 className="font-bold text-slate-800 text-lg mb-1">{group.name}</h3>
+                    <div className="flex items-center gap-3 text-sm text-slate-500">
+                      <span className="flex items-center gap-1"><Users className="w-4 h-4" /> {group.members.length} {group.members.length === 1 ? 'member' : 'members'}</span>
+                      {confirmed ? (
+                        <span className="flex items-center gap-1 text-emerald-600 font-medium bg-emerald-50 px-2 py-0.5 rounded-full"><Check className="w-3 h-3" /> Scheduled</span>
+                      ) : (
+                        <span className="flex items-center gap-1 text-amber-600 font-medium bg-amber-50 px-2 py-0.5 rounded-full"><Clock className="w-3 h-3" /> Pending</span>
+                      )}
+                    </div>
+                  </div>
+                  <div className="w-10 h-10 rounded-full bg-slate-50 flex items-center justify-center text-slate-400">
+                    →
+                  </div>
+                </div>
+              );
+            })}
+
+            {groups.filter(g => g.members.includes(currentUser.id)).length === 0 && (
+              <div className="text-center py-10 px-4 bg-white rounded-xl border border-slate-200 border-dashed text-slate-500 mt-2 shadow-sm">
+                <Users className="w-8 h-8 mx-auto text-slate-300 mb-2" />
+                <p className="font-medium text-slate-700">No GEMBA study groups yet.</p>
+                <p className="text-xs mt-1 max-w-sm mx-auto">
+                  Share this link with your colleagues so they can sign up with their <strong>@skema.edu</strong> email, then tap <strong>New Group</strong>.
+                </p>
+                <button
+                  onClick={handleCopyInviteLink}
+                  className="mt-4 inline-flex items-center gap-1.5 px-4 py-2 bg-indigo-50 text-indigo-700 hover:bg-indigo-100 rounded-lg text-xs font-semibold transition-colors"
+                >
+                  <Share2 className="w-3.5 h-3.5" /> Copy App Link for Colleagues
+                </button>
+              </div>
+            )}
+          </div>
+        </div>
+      )}
+
+      {/* CREATE NEW GROUP */}
+      {activeTab === 'groups' && isCreatingGroup && (
+        <div className="flex-1 overflow-auto bg-slate-50 flex flex-col">
+          <div className="bg-white p-4 border-b border-slate-200 shrink-0 flex items-center gap-3">
+            <button
+              onClick={() => setIsCreatingGroup(false)}
+              className="text-slate-500 hover:text-slate-800 bg-slate-100 p-2 rounded-full transition-colors"
+            >
+              <X className="w-5 h-5" />
+            </button>
+            <h2 className="text-xl font-bold text-slate-900">Create GEMBA Study Group</h2>
+          </div>
+
+          <div className="p-4 sm:p-6 flex-1 flex flex-col gap-5 max-w-2xl mx-auto w-full">
+            <div>
+              <label className="block text-sm font-semibold text-slate-700 mb-1">Group / Course Topic Name</label>
+              <input
+                type="text"
+                placeholder="e.g. Global Strategy Case Study"
+                value={newGroupName}
+                onChange={(e) => setNewGroupName(e.target.value)}
+                className="w-full p-3 bg-white border border-slate-300 rounded-lg shadow-sm focus:ring-2 focus:ring-indigo-500 outline-none"
+              />
+            </div>
+
+            <div className="flex flex-col gap-2">
+              <label className="block text-sm font-semibold text-slate-700">Select Registered GEMBA Cohort Members</label>
+              <div className="bg-blue-50 border border-blue-100 text-blue-900 text-xs p-3 rounded-lg flex items-start gap-2">
+                <ShieldCheck className="w-4 h-4 text-blue-600 shrink-0 mt-0.5" />
+                <span>
+                  For GDPR compliance, teammates self-register with their <strong>@skema.edu</strong> email and opt in before appearing here.
+                </span>
+              </div>
+
+              <div className="bg-white border border-slate-200 rounded-lg overflow-hidden shadow-sm">
+                <div className="max-h-72 overflow-y-auto">
+                  {cohort.map(u => (
+                    <label key={u.id} className="flex items-center gap-3 p-3 border-b border-slate-100 hover:bg-slate-50 cursor-pointer transition-colors">
+                      <div className="relative flex items-center justify-center">
+                        <input
+                          type="checkbox"
+                          checked={newGroupMembers.includes(u.id)}
+                          disabled={u.id === currentUser.id}
+                          onChange={(e) => {
+                            if (e.target.checked) setNewGroupMembers([...newGroupMembers, u.id]);
+                            else setNewGroupMembers(newGroupMembers.filter(id => id !== u.id));
+                          }}
+                          className="peer appearance-none w-5 h-5 border-2 border-slate-300 rounded bg-white checked:bg-indigo-600 checked:border-indigo-600 disabled:opacity-50 cursor-pointer"
+                        />
+                        <Check className="absolute w-3 h-3 text-white pointer-events-none opacity-0 peer-checked:opacity-100" strokeWidth={4} />
+                      </div>
+                      <div className="flex-1 min-w-0">
+                        <div className="font-semibold text-slate-800 text-sm flex items-center gap-2">
+                          <span className="truncate">{u.name}</span>
+                          {u.id === currentUser.id && <span className="text-[10px] bg-slate-100 text-slate-500 px-1.5 py-0.5 rounded uppercase tracking-wider shrink-0">You (Organizer)</span>}
+                        </div>
+                        <div className="text-xs text-slate-500 truncate">
+                          {formatZoneOptionLabel(getUserTimezoneForWeek(u, currentBaseUtc), currentBaseUtc)}
+                        </div>
+                      </div>
+                    </label>
+                  ))}
+                </div>
+                <div className="bg-slate-50 p-3 text-xs font-semibold text-slate-500 border-t border-slate-200 text-center flex items-center justify-center gap-2">
+                  <CheckSquare className="w-4 h-4" /> {newGroupMembers.length} {newGroupMembers.length === 1 ? 'Member' : 'Members'} Selected
+                </div>
+              </div>
+            </div>
+
+            <button
+              onClick={handleCreateGroup}
+              disabled={!newGroupName.trim() || newGroupMembers.length === 0}
+              className="mt-2 w-full py-3 bg-indigo-600 text-white font-bold rounded-lg shadow hover:bg-indigo-700 disabled:opacity-50 disabled:cursor-not-allowed transition-colors"
+            >
+              Create Group
+            </button>
+          </div>
+        </div>
+      )}
+
+      {/* GROUP DETAIL VIEW */}
+      {activeTab === 'groups' && activeGroup && !isCreatingGroup && (
+        <div className="flex-1 flex flex-col overflow-hidden bg-slate-50">
+          <div className="bg-white p-4 border-b border-slate-200 shrink-0">
+            <button
+              onClick={() => setActiveGroupId(null)}
+              className="text-blue-600 text-sm font-semibold flex items-center gap-1 mb-2 hover:underline"
+            >
+              ← Back to Groups
+            </button>
+            <h2 className="text-2xl font-bold text-slate-900">{activeGroup.name}</h2>
+            <p className="text-slate-500 text-sm">
+              Viewing in <strong>{activeTimezone.replace(/_/g, ' ')}</strong> • DST-aware IANA times
+            </p>
+          </div>
+
+          <div className="flex border-b border-slate-200 bg-white shrink-0">
+            {['ranked', 'heatmap', 'members'].map(tab => (
+              <button
+                key={tab}
+                onClick={() => setGroupTab(tab)}
+                className={`flex-1 py-3 text-sm font-semibold capitalize transition-colors ${groupTab === tab ? 'text-indigo-600 border-b-2 border-indigo-600 bg-indigo-50/30' : 'text-slate-500 hover:bg-slate-50'}`}
+              >
+                {tab === 'ranked' ? 'Ranked Options' : tab}
+              </button>
+            ))}
+          </div>
+
+          <div className="flex-1 overflow-auto p-4">
+            {groupTab === 'ranked' && (
+              <>
+                {confirmedMeetings[activeGroup.id] ? (
+                  <div className="bg-emerald-50 border-2 border-emerald-400 rounded-xl p-8 text-center shadow-sm mt-2">
+                    <div className="w-16 h-16 bg-emerald-100 rounded-full flex items-center justify-center mx-auto mb-4">
+                      <Check className="w-8 h-8 text-emerald-600" strokeWidth={3} />
+                    </div>
+                    <h2 className="text-2xl font-bold text-emerald-900 mb-2">Meeting Confirmed</h2>
+                    <p className="text-emerald-700 font-medium mb-2 text-xl">
+                      {formatTimeForZoneFull(confirmedMeetings[activeGroup.id].utcTimestamp, activeTimezone)}
+                    </p>
+                    <p className="text-xs text-emerald-700/80 mb-6">
+                      This time is now blocked across all other GEMBA groups. The organizer can send the Outlook/Teams invite.
+                    </p>
+                    {isGroupAdmin && (
+                      <button
+                        onClick={() => handleUnconfirmMeeting(activeGroup.id)}
+                        className="px-6 py-3 bg-white text-emerald-700 border-2 border-emerald-300 font-semibold rounded-lg shadow-sm hover:bg-emerald-100 transition-colors flex items-center justify-center mx-auto gap-2"
+                      >
+                        <X className="w-5 h-5" /> Unconfirm / Adjust
+                      </button>
+                    )}
+                  </div>
+                ) : rankedSlots.length === 0 ? (
+                  <div className="text-center py-10 bg-white rounded-xl border border-slate-200 text-slate-500 mt-2 shadow-sm">
+                    <AlertCircle className="w-8 h-8 mx-auto text-slate-300 mb-2" />
+                    <p>No overlapping slots found for {weekInfo.full}.</p>
+                    <p className="text-sm mt-1">Make sure members have marked availability in "My Avail", or check another week.</p>
+                  </div>
+                ) : (
+                  <div className="flex flex-col gap-4 mt-2">
+                    {rankedSlots.map((slot, idx) => (
+                      <div key={slot.utcTimestamp} className={`flex flex-col sm:flex-row bg-white rounded-xl shadow-sm border overflow-hidden transition-all hover:shadow-md ${idx === 0 ? 'border-indigo-400 ring-2 ring-indigo-100' : 'border-slate-200'}`}>
+                        <div className="flex-1 p-5 flex flex-col justify-between">
+                          <div>
+                            <div className="flex items-center gap-3 mb-2 flex-wrap">
+                              <div className={`font-bold text-lg sm:text-xl ${idx === 0 ? 'text-indigo-700' : 'text-slate-800'}`}>
+                                {formatTimeForZoneFull(slot.utcTimestamp, activeTimezone)}
+                              </div>
+                              {idx === 0 && <span className="bg-indigo-100 text-indigo-700 text-[10px] font-bold px-2.5 py-1 rounded-full uppercase tracking-wider">Top Pick</span>}
+                            </div>
+                            <div className="text-sm text-slate-500 flex items-center gap-2 mb-5 font-medium">
+                              <Users className="w-4 h-4" /> {slot.totalFree} / {slot.totalMembers} Available
+                            </div>
+                          </div>
+                          {isGroupAdmin ? (
+                            <button
+                              onClick={() => handleConfirmMeeting(activeGroup, slot.utcTimestamp)}
+                              className={`w-full py-3 px-4 font-semibold rounded-lg transition-colors text-sm text-center shadow-sm flex items-center justify-center gap-2 ${idx === 0 ? 'bg-indigo-600 hover:bg-indigo-700 text-white' : 'bg-slate-100 text-slate-700 hover:bg-slate-200'}`}
+                            >
+                              <Check className="w-4 h-4" strokeWidth={3} /> Confirm Meeting
+                            </button>
+                          ) : (
+                            <div className="text-xs text-slate-400 bg-slate-50 border border-slate-100 rounded-lg p-2.5 text-center">
+                              Only the group organizer can confirm the final slot.
+                            </div>
+                          )}
+                        </div>
+
+                        <div className={`p-4 sm:w-64 border-t sm:border-t-0 sm:border-l ${idx === 0 ? 'border-indigo-200 bg-indigo-50/40' : 'border-slate-100 bg-slate-50/50'} text-sm overflow-y-auto max-h-52 sm:max-h-none`}>
+                          <div className={`font-semibold mb-3 text-xs uppercase tracking-wider ${idx === 0 ? 'text-indigo-900' : 'text-slate-500'}`}>Member Local Times</div>
+                          <div className="flex flex-col gap-2">
+                            {slot.memberStatuses.map(ms => (
+                              <div key={ms.user.id} className="flex items-center justify-between gap-2">
+                                <div className="flex items-center gap-2 min-w-0">
+                                  {ms.state === 'blocked' ? (
+                                    <div className="w-4 h-4 rounded-full bg-red-100 flex items-center justify-center shrink-0" title="Blocked by another meeting"><X className="w-3 h-3 text-red-600" strokeWidth={3} /></div>
+                                  ) : ms.state === 'unavailable' ? (
+                                    <div className="w-4 h-4 rounded-full bg-slate-200 flex items-center justify-center shrink-0"><div className="w-2 h-0.5 bg-slate-400 rounded-full"></div></div>
+                                  ) : (
+                                    <div className="w-4 h-4 rounded-full bg-emerald-100 flex items-center justify-center shrink-0"><Check className="w-3 h-3 text-emerald-600" strokeWidth={3} /></div>
+                                  )}
+                                  <span className={`truncate text-sm ${ms.state === 'blocked' ? 'text-red-600 line-through' : ms.state === 'unavailable' ? 'text-slate-400' : 'text-slate-700 font-medium'}`}>
+                                    {ms.user.name.split(' ')[0]}
+                                    {ms.state === 'blocked' && <span className="text-[10px] ml-1 no-underline font-semibold">(Blocked)</span>}
+                                  </span>
+                                </div>
+                                <span className={`font-mono text-xs shrink-0 ${ms.isBadHour ? 'text-red-500 font-semibold' : (idx === 0 ? 'text-indigo-700' : 'text-slate-500')}`}>
+                                  {formatTimeForZoneShort(slot.utcTimestamp, ms.memberWeekTz)}
+                                </span>
+                              </div>
+                            ))}
+                          </div>
+                        </div>
+                      </div>
+                    ))}
+                  </div>
+                )}
+              </>
+            )}
+
+            {groupTab === 'heatmap' && (
+              <div className="bg-white rounded-xl border border-slate-200 p-4 shadow-sm">
+                <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2 mb-4 border-b border-slate-100 pb-3">
+                  <div className="text-sm font-semibold text-slate-700">Group Heatmap</div>
+                  <select
+                    value={heatmapUserId || currentUser.id}
+                    onChange={(e) => setHeatmapUserId(e.target.value)}
+                    className="text-xs border border-slate-200 rounded p-1.5 bg-slate-50 text-slate-700"
+                  >
+                    {activeGroup.members
+                      .map(mId => cohort.find(u => u.id === mId))
+                      .filter(Boolean)
+                      .map(u => {
+                        const uWeekTz = getUserTimezoneForWeek(u, currentBaseUtc);
+                        return (
+                          <option key={u.id} value={u.id}>
+                            View in: {u.name}'s Time ({uWeekTz.split('/').pop().replace(/_/g, ' ')})
+                          </option>
+                        );
+                      })}
+                  </select>
+                </div>
+
+                <div className="overflow-x-auto">
+                  <div className="min-w-[600px] flex flex-col gap-0.5">
+                    <div className="flex mb-1">
+                      <div className="w-12"></div>
+                      {GRID_HOURS.map((h) => (
+                        <div key={h} className="flex-1 text-[10px] text-slate-400 text-center font-mono">
+                          {h.toString().padStart(2, '0')}
+                        </div>
+                      ))}
+                    </div>
+                    {generateGrid(
+                      getUserTimezoneForWeek(cohort.find(u => u.id === heatmapUserId) || currentUser, currentBaseUtc),
+                      currentBaseUtc,
+                      60
+                    ).map(day => (
+                      <div key={day.dayName} className="flex gap-0.5 items-center">
+                        <div className="w-12 flex flex-col items-start justify-center">
+                          <span className="text-xs font-medium text-slate-500 leading-none">{day.dayName}</span>
+                          <span className="text-[9px] text-slate-400">{day.dateStr}</span>
+                        </div>
+                        {day.slots.map(slot => {
+                          const count = heatmapData[slot.utcTimestamp] || 0;
+                          const total = Math.max(activeGroup.members.length, 1);
+                          const ratio = count / total;
+                          const intensity = count === 0 ? 'bg-slate-50' :
+                            ratio < 0.4 ? 'bg-emerald-100' :
+                            ratio < 0.7 ? 'bg-emerald-300' :
+                            ratio < 1 ? 'bg-emerald-500' : 'bg-emerald-700';
+                          return (
+                            <div
+                              key={slot.utcTimestamp}
+                              title={`${count} / ${total} members available`}
+                              className={`flex-1 h-6 rounded-sm ${intensity} transition-colors hover:ring-1 hover:ring-black/20`}
+                            ></div>
+                          );
+                        })}
+                      </div>
+                    ))}
+                  </div>
+                </div>
+                <div className="flex justify-end gap-2 mt-4 text-[10px] text-slate-500 font-medium">
+                  <div className="flex items-center gap-1"><div className="w-2 h-2 bg-slate-50 border border-slate-200"></div> 0</div>
+                  <div className="flex items-center gap-1"><div className="w-2 h-2 bg-emerald-100"></div> Low</div>
+                  <div className="flex items-center gap-1"><div className="w-2 h-2 bg-emerald-300"></div> Partial</div>
+                  <div className="flex items-center gap-1"><div className="w-2 h-2 bg-emerald-500"></div> High</div>
+                  <div className="flex items-center gap-1"><div className="w-2 h-2 bg-emerald-700"></div> All</div>
+                </div>
+              </div>
+            )}
+
+            {groupTab === 'members' && (
+              <div className="bg-white rounded-xl border border-slate-200 overflow-hidden shadow-sm">
+                {activeGroup.members
+                  .map(mId => cohort.find(u => u.id === mId))
+                  .filter(Boolean)
+                  .map((u, i) => {
+                    const uWeekTz = getUserTimezoneForWeek(u, currentBaseUtc);
+                    const isTraveling = Boolean(weekTimezones[u.id]?.[currentBaseUtc] && weekTimezones[u.id][currentBaseUtc] !== u.timezone);
+                    return (
+                      <div key={u.id} className={`p-4 flex items-center justify-between gap-2 ${i !== 0 ? 'border-t border-slate-100' : ''}`}>
+                        <div className="flex items-center gap-3 min-w-0">
+                          <div className="w-10 h-10 rounded-full bg-blue-100 text-blue-700 flex items-center justify-center font-bold shrink-0">
+                            {u.name.charAt(0).toUpperCase()}
+                          </div>
+                          <div className="min-w-0">
+                            <div className="font-bold text-slate-800 truncate flex items-center gap-1.5">
+                              <span>{u.name}</span>
+                              {activeGroup.adminId === u.id && (
+                                <span className="text-[10px] bg-indigo-50 text-indigo-700 px-1.5 py-0.5 rounded font-semibold">Organizer</span>
+                              )}
+                              {isTraveling && (
+                                <span className="text-[10px] bg-blue-50 text-blue-700 px-1.5 py-0.5 rounded font-semibold">Traveling</span>
+                              )}
+                            </div>
+                            <div className="text-xs text-slate-500 truncate">{u.email}</div>
+                          </div>
+                        </div>
+                        <div className="text-right shrink-0">
+                          <div className="text-xs sm:text-sm font-medium text-slate-700">{uWeekTz.replace(/_/g, ' ')}</div>
+                          <div className="text-xs text-slate-400">
+                            {getZoneAbbreviation(currentBaseUtc, uWeekTz)} ({formatOffsetLabel(getUtcOffsetMinutes(currentBaseUtc, uWeekTz))})
+                          </div>
+                        </div>
+                      </div>
+                    );
+                  })}
+              </div>
+            )}
+          </div>
+        </div>
+      )}
+
+      {/* TAB 3: PRIVACY (GDPR) */}
+      {activeTab === 'privacy' && (
+        <div className="flex-1 overflow-auto bg-slate-50 p-4 sm:p-6">
+          <div className="max-w-xl mx-auto flex flex-col gap-5">
+            <div>
+              <h2 className="text-xl font-bold text-slate-900 flex items-center gap-2">
+                <ShieldCheck className="w-6 h-6 text-indigo-600" /> Privacy & Account (GDPR)
+              </h2>
+              <p className="text-xs text-slate-500 mt-1">
+                Manage your home timezone, review how your GEMBA cohort data is handled, or exercise your GDPR rights.
+              </p>
+            </div>
+
+            {privacyNotice && (
+              <div className="bg-emerald-50 border border-emerald-200 text-emerald-800 text-xs p-3 rounded-lg flex items-center justify-between">
+                <span className="flex items-center gap-2"><Check className="w-4 h-4 shrink-0" /> {privacyNotice}</span>
+                <button onClick={() => setPrivacyNotice('')} className="text-emerald-600 hover:text-emerald-900"><X className="w-4 h-4" /></button>
+              </div>
+            )}
+
+            <div className="bg-white rounded-xl border border-slate-200 p-4 shadow-sm flex flex-col gap-3">
+              <div className="flex items-center gap-3 pb-3 border-b border-slate-100">
+                <div className="w-10 h-10 rounded-full bg-indigo-100 text-indigo-700 flex items-center justify-center font-bold">
+                  {currentUser.name.charAt(0).toUpperCase()}
+                </div>
+                <div>
+                  <div className="font-bold text-slate-800">{currentUser.name}</div>
+                  <div className="text-xs text-slate-500">{currentUser.email}</div>
+                </div>
+              </div>
+              <div>
+                <label className="block text-xs font-semibold text-slate-700 mb-1.5">
+                  Home Timezone (Standard IANA • DST Automatic)
+                </label>
+                <TimezonePicker
+                  value={currentUser.timezone}
+                  onChange={async (newTz) => {
+                    try {
+                      await sbFetch(`gemba_users?id=eq.${encodeURIComponent(currentUser.id)}`, {
+                        method: 'PATCH',
+                        body: JSON.stringify({ timezone: newTz }),
+                      });
+                      setCohort(prev => prev.map(u => u.id === currentUser.id ? { ...u, timezone: newTz } : u));
+                      setPrivacyNotice(`Home timezone updated to ${newTz.replace(/_/g, ' ')}.`);
+                    } catch {
+                      setPrivacyNotice('Could not update timezone in EU Cloud.');
+                    }
+                  }}
+                  refUtcMs={currentBaseUtc}
+                />
+              </div>
+            </div>
+
+            <div className="bg-white rounded-xl border border-slate-200 p-4 shadow-sm flex flex-col gap-2.5 text-xs text-slate-600">
+              <div className="font-bold text-slate-800 text-sm flex items-center gap-2">
+                <UserCheck className="w-4 h-4 text-emerald-600" /> Data Minimization & EU Hosting
+              </div>
+              <ul className="list-disc pl-5 space-y-1.5">
+                <li><strong>EU Paris Hosting:</strong> All cohort records are stored in West EU (Paris) servers.</li>
+                <li><strong>Minimal Data Stored:</strong> Only your name, <code>@skema.edu</code> email, broad IANA timezone (no GPS or address), and weekly free/busy slots.</li>
+                <li><strong>Self-Registration Only:</strong> Bulk uploading classmates' emails is disabled to ensure explicit opt-in consent.</li>
+                <li><strong>Independent Student Tool:</strong> Operated voluntarily by GEMBA cohort members, not an official SKEMA IT system.</li>
+              </ul>
+            </div>
+
+            <div className="bg-white rounded-xl border border-slate-200 p-4 shadow-sm flex flex-col gap-3">
+              <div className="font-bold text-slate-800 text-sm">Your GDPR Rights</div>
+
+              <button
+                onClick={handleExportMyData}
+                className="w-full py-2.5 px-4 bg-slate-100 hover:bg-slate-200 text-slate-800 font-semibold rounded-lg text-xs flex items-center justify-center gap-2 transition-colors"
+              >
+                <Download className="w-4 h-4" /> Export My Data (JSON)
+              </button>
+
+              {!confirmingDelete ? (
+                <button
+                  onClick={() => setConfirmingDelete(true)}
+                  className="w-full py-2.5 px-4 bg-red-50 hover:bg-red-100 text-red-700 border border-red-200 font-semibold rounded-lg text-xs flex items-center justify-center gap-2 transition-colors"
+                >
+                  <Trash2 className="w-4 h-4" /> Delete My Account & All Data
+                </button>
+              ) : (
+                <div className="bg-red-50 border border-red-300 rounded-lg p-3 flex flex-col gap-2.5">
+                  <p className="text-xs text-red-800 font-medium">
+                    Are you sure? This permanently erases your profile, availability, and removes you from all GEMBA study groups.
+                  </p>
+                  <div className="flex gap-2">
+                    <button
+                      onClick={() => setConfirmingDelete(false)}
+                      className="flex-1 py-2 bg-white border border-slate-300 text-slate-700 rounded-lg text-xs font-semibold hover:bg-slate-50"
+                    >
+                      Cancel
+                    </button>
+                    <button
+                      onClick={handleDeleteMyAccount}
+                      className="flex-1 py-2 bg-red-600 hover:bg-red-700 text-white rounded-lg text-xs font-semibold"
+                    >
+                      Yes, Permanently Delete
+                    </button>
+                  </div>
+                </div>
+              )}
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Bottom Tab Navigation */}
+      <nav className="bg-white border-t border-slate-200 flex shrink-0 pb-safe z-20">
+        <button
+          onClick={() => { setActiveTab('avail'); setIsCreatingGroup(false); }}
+          className={`flex-1 p-3.5 flex flex-col items-center justify-center gap-1 transition-colors ${activeTab === 'avail' ? 'text-blue-600' : 'text-slate-400 hover:text-slate-600 hover:bg-slate-50'}`}
+        >
+          <Calendar className="w-5 h-5" />
+          <span className="text-[10px] font-bold uppercase tracking-wider">My Avail</span>
+        </button>
+        <button
+          onClick={() => { setActiveTab('groups'); }}
+          className={`flex-1 p-3.5 flex flex-col items-center justify-center gap-1 transition-colors ${activeTab === 'groups' ? 'text-blue-600' : 'text-slate-400 hover:text-slate-600 hover:bg-slate-50'}`}
+        >
+          <Users className="w-5 h-5" />
+          <span className="text-[10px] font-bold uppercase tracking-wider">Groups</span>
+        </button>
+        <button
+          onClick={() => { setActiveTab('privacy'); setIsCreatingGroup(false); }}
+          className={`flex-1 p-3.5 flex flex-col items-center justify-center gap-1 transition-colors ${activeTab === 'privacy' ? 'text-blue-600' : 'text-slate-400 hover:text-slate-600 hover:bg-slate-50'}`}
+        >
+          <ShieldCheck className="w-5 h-5" />
+          <span className="text-[10px] font-bold uppercase tracking-wider">Privacy</span>
+        </button>
+      </nav>
+    </div>
+  );
+}
