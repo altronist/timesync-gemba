@@ -151,7 +151,74 @@ const formatOffsetLabel = (offsetMin) => {
   const abs = Math.abs(offsetMin);
   const hrs = Math.floor(abs / 60);
   const mins = abs % 60;
-  return mins === 0 ? `UTC${sign}${hrs}` : `UTC${sign}${hrs}:${mins.toString().padStart(2, '0')}`; };  const getZoneAbbreviation = (utcMs, timeZone) => { try { const parts = new Intl.DateTimeFormat('en-US', { timeZone, timeZoneName: 'short', }).formatToParts(new Date(utcMs)); return parts.find(p => p.type === 'timeZoneName')?.value \vert{}\vert{} ''; } catch { return ''; } };  const localToUtcMs = (year, monthIndex, day, hour, minute, timeZone) => { const guess = Date.UTC(year, monthIndex, day, hour, minute, 0); const offset1 = getUtcOffsetMinutes(guess, timeZone); const utc1 = guess - offset1 * 60000; const offset2 = getUtcOffsetMinutes(utc1, timeZone); const exactUtc = guess - offset2 * 60000; return Math.round(exactUtc / 1800000) * 1800000; };  const getLocalParts = (utcMs, timeZone) => { try { const dtf = new Intl.DateTimeFormat('en-US', { timeZone, weekday: 'short', month: 'short', day: 'numeric', hour: '2-digit', minute: '2-digit', hourCycle: 'h23', timeZoneName: 'short', }); const parts = dtf.formatToParts(new Date(utcMs)); const map = {}; for (const p of parts) map[p.type] = p.value; const hourNum = Number(map.hour) === 24 ? 0 : Number(map.hour); return { weekday: map.weekday \vert{}\vert{} 'Mon', month: map.month \vert{}\vert{} '', day: map.day \vert{}\vert{} '', hourNum, hourStr: hourNum.toString().padStart(2, '0'), minuteStr: map.minute \vert{}\vert{} '00', tzAbbr: map.timeZoneName \vert{}\vert{} '', }; } catch { const d = new Date(utcMs); return { weekday: DAYS[d.getUTCDay() === 0 ? 6 : d.getUTCDay() - 1], month: d.toLocaleString('en-US', { month: 'short', timeZone: 'UTC' }), day: String(d.getUTCDate()), hourNum: d.getUTCHours(), hourStr: d.getUTCHours().toString().padStart(2, '0'), minuteStr: d.getUTCMinutes().toString().padStart(2, '0'), tzAbbr: 'UTC', }; } };  const formatZoneOptionLabel = (tz, refUtcMs) => { const offsetMin = getUtcOffsetMinutes(refUtcMs, tz); const abbr = getZoneAbbreviation(refUtcMs, tz); const prettyName = tz.replace(/_/g, ' '); return `${prettyName} (${abbr ? abbr + ' • ' : ''}${formatOffsetLabel(offsetMin)})`;
+  return mins === 0 ? `UTC${sign}${hrs}` : `UTC${sign}${hrs}:${mins.toString().padStart(2, '0')}`;
+};
+
+const getZoneAbbreviation = (utcMs, timeZone) => {
+  try {
+    const parts = new Intl.DateTimeFormat('en-US', {
+      timeZone,
+      timeZoneName: 'short',
+    }).formatToParts(new Date(utcMs));
+    return parts.find(p => p.type === 'timeZoneName')?.value || '';
+  } catch {
+    return '';
+  }
+};
+
+const localToUtcMs = (year, monthIndex, day, hour, minute, timeZone) => {
+  const guess = Date.UTC(year, monthIndex, day, hour, minute, 0);
+  const offset1 = getUtcOffsetMinutes(guess, timeZone);
+  const utc1 = guess - offset1 * 60000;
+  const offset2 = getUtcOffsetMinutes(utc1, timeZone);
+  const exactUtc = guess - offset2 * 60000;
+  return Math.round(exactUtc / 1800000) * 1800000;
+};
+
+const getLocalParts = (utcMs, timeZone) => {
+  try {
+    const dtf = new Intl.DateTimeFormat('en-US', {
+      timeZone,
+      weekday: 'short',
+      month: 'short',
+      day: 'numeric',
+      hour: '2-digit',
+      minute: '2-digit',
+      hourCycle: 'h23',
+      timeZoneName: 'short',
+    });
+    const parts = dtf.formatToParts(new Date(utcMs));
+    const map = {};
+    for (const p of parts) map[p.type] = p.value;
+    const hourNum = Number(map.hour) === 24 ? 0 : Number(map.hour);
+    return {
+      weekday: map.weekday || 'Mon',
+      month: map.month || '',
+      day: map.day || '',
+      hourNum,
+      hourStr: hourNum.toString().padStart(2, '0'),
+      minuteStr: map.minute || '00',
+      tzAbbr: map.timeZoneName || '',
+    };
+  } catch {
+    const d = new Date(utcMs);
+    return {
+      weekday: DAYS[d.getUTCDay() === 0 ? 6 : d.getUTCDay() - 1],
+      month: d.toLocaleString('en-US', { month: 'short', timeZone: 'UTC' }),
+      day: String(d.getUTCDate()),
+      hourNum: d.getUTCHours(),
+      hourStr: d.getUTCHours().toString().padStart(2, '0'),
+      minuteStr: d.getUTCMinutes().toString().padStart(2, '0'),
+      tzAbbr: 'UTC',
+    };
+  }
+};
+
+const formatZoneOptionLabel = (tz, refUtcMs) => {
+  const offsetMin = getUtcOffsetMinutes(refUtcMs, tz);
+  const abbr = getZoneAbbreviation(refUtcMs, tz);
+  const prettyName = tz.replace(/_/g, ' ');
+  return `${prettyName} (${abbr ? abbr + ' • ' : ''}${formatOffsetLabel(offsetMin)})`;
 };
 
 const getMondayMidnightUtc = () => {
@@ -234,7 +301,239 @@ function TimezonePicker({ value, onChange, refUtcMs, placeholder = 'Search city 
                       setIsOpen(false);
                       setQuery('');
                     }}
-                    className={`w-full text-left px-3 py-2 text-xs flex items-center justify-between hover:bg-indigo-50 transition-colors ${isSelected ? 'bg-indigo-50 text-indigo-700 font-semibold' : 'text-slate-700'}`} > <span className="truncate">{formatZoneOptionLabel(tz, refUtcMs)}</span> {isSelected && <Check className="w-3.5 h-3.5 text-indigo-600 shrink-0" />} </button> ); }) )} </div> <div className="px-3 py-1.5 bg-slate-50 border-t border-slate-100 text-[10px] text-slate-500 flex items-center gap-1"> <Info className="w-3 h-3 shrink-0" /> Standard IANA database • Daylight Saving Time (DST) is automatic. </div> </div> )} </div> ); }  export default function App() { const [cohort, setCohort] = useState([]); const [groups, setGroups] = useState([]); const [availabilities, setAvailabilities] = useState({}); const [weekTimezones, setWeekTimezones] = useState({}); // { [userId]: { [weekMondayUtc]: 'Europe/Paris' } } const [confirmedMeetings, setConfirmedMeetings] = useState({}); const [isSyncing, setIsSyncing] = useState(false); const [syncError, setSyncError] = useState(''); const [toastMessage, setToastMessage] = useState('');  // Auth State const [isAuthenticated, setIsAuthenticated] = useState(false); const [authMode, setAuthMode] = useState('login'); // 'login' \vert{} 'signup' \vert{} 'reset' const [authEmail, setAuthEmail] = useState(''); const [authPassword, setAuthPassword] = useState(''); const [authName, setAuthName] = useState(''); const [authTimezone, setAuthTimezone] = useState(DETECTED_TIMEZONE); const [authGdprAccepted, setAuthGdprAccepted] = useState(false); const [authError, setAuthError] = useState(''); const [authSuccess, setAuthSuccess] = useState(''); const [authLoading, setAuthLoading] = useState(false);  // App State const [currentUserId, setCurrentUserId] = useState(null); const [activeTab, setActiveTab] = useState('avail'); // 'avail' \vert{} 'groups' \vert{} 'privacy' const [activeGroupId, setActiveGroupId] = useState(null); const [groupTab, setGroupTab] = useState('ranked'); // 'ranked' \vert{} 'heatmap' \vert{} 'members' const [slotDuration, setSlotDuration] = useState(60); // 60 \vert{} 30  // Week State const [weekOffset, setWeekOffset] = useState(0); const currentBaseUtc = CURRENT_MONDAY + weekOffset * 7 * 24 * 3600 * 1000;  // Heatmap Override const [heatmapUserId, setHeatmapUserId] = useState(null);  // Group Creation State const [isCreatingGroup, setIsCreatingGroup] = useState(false); const [newGroupName, setNewGroupName] = useState(''); const [newGroupMembers, setNewGroupMembers] = useState([]);  // Group Editing State (Organizer Only) const [isEditingGroup, setIsEditingGroup] = useState(false); const [editGroupName, setEditGroupName] = useState(''); const [editGroupMembers, setEditGroupMembers] = useState([]); const [confirmingDeleteGroup, setConfirmingDeleteGroup] = useState(false);  // GDPR Account Deletion const [confirmingDelete, setConfirmingDelete] = useState(false); const [privacyNotice, setPrivacyNotice] = useState('');  // Quick Action Toggles const [toggles, setToggles] = useState({ typical: false, weekend: false, custom: false }); const [customPreset, setCustomPreset] = useState([]);  const currentUser = cohort.find(u => u.id === currentUserId) \vert{}\vert{} null; const activeGroup = groups.find(g => g.id === activeGroupId) \vert{}\vert{} null;  // Per-week timezone resolution const getUserTimezoneForWeek = useCallback((userObj, weekMondayUtc) => { if (!userObj) return DETECTED_TIMEZONE; return weekTimezones[userObj.id]?.[weekMondayUtc] \vert{}\vert{} userObj.timezone \vert{}\vert{} DETECTED_TIMEZONE; }, [weekTimezones]);  const currentWeekOverrideTz = currentUser ? (weekTimezones[currentUser.id]?.[currentBaseUtc] \vert{}\vert{} null) : null; const travelModeEnabled = Boolean(currentWeekOverrideTz); const activeTimezone = currentWeekOverrideTz \vert{}\vert{} currentUser?.timezone \vert{}\vert{} DETECTED_TIMEZONE;  const showToast = (msg) => { setToastMessage(msg); setTimeout(() => setToastMessage(''), 3000); };  // --- Cloud Sync Loader (Supabase REST) --- const syncFromCloud = useCallback(async (showFeedback = false) => { setIsSyncing(true); setSyncError(''); try { const [usersRows, groupsRows, availRows, meetingRows] = await Promise.all([ sbFetch('gemba_users?select=*'), sbFetch('gemba_groups?select=*'), sbFetch('gemba_availabilities?select=*'), sbFetch('gemba_meetings?select=*'), ]);  const mappedUsers = (usersRows \vert{}\vert{} []).map(r => ({ id: r.id, name: r.name, email: r.email, passwordHash: r.password_hash, timezone: r.timezone, gdprConsentAt: r.gdpr_consent_at, })); const mappedGroups = (groupsRows \vert{}\vert{} []).map(r => ({ id: r.id, name: r.name, adminId: r.admin_id, members: Array.isArray(r.members) ? r.members : [], })); const mappedAvail = {}; const mappedWeekTz = {}; (availRows \vert{}\vert{} []).forEach(r => { const ts = Number(r.utc_ts); if (r.state === 'tz_override' \vert{}\vert{} ts < 0) { if (r.week_timezone) { if (!mappedWeekTz[r.user_id]) mappedWeekTz[r.user_id] = {}; mappedWeekTz[r.user_id][Math.abs(ts)] = r.week_timezone; } } else { if (!mappedAvail[r.user_id]) mappedAvail[r.user_id] = {}; mappedAvail[r.user_id][ts] = r.state; } }); const mappedMeetings = {}; (meetingRows \vert{}\vert{} []).forEach(r => { mappedMeetings[r.group_id] = { utcTimestamp: Number(r.utc_ts), members: Array.isArray(r.members) ? r.members : [], }; });  setCohort(mappedUsers); setGroups(mappedGroups); setAvailabilities(mappedAvail); setWeekTimezones(mappedWeekTz); setConfirmedMeetings(mappedMeetings);  if (mappedUsers.length === 0 && !isAuthenticated) { setAuthMode('signup'); } if (showFeedback) { showToast('Synced latest updates from EU Cloud.'); } } catch { setSyncError('Could not reach EU Cloud database. Tap Refresh to retry.'); } finally { setIsSyncing(false); } }, [isAuthenticated]);  useEffect(() => { syncFromCloud(false); const interval = setInterval(() => syncFromCloud(false), 20000); return () => clearInterval(interval); }, [syncFromCloud]);  useEffect(() => { if (!currentUser) return; setHeatmapUserId(currentUser.id); setConfirmingDelete(false); }, [currentUser?.id]);  // Reset quick-action toggle labels when switching weeks useEffect(() => { setToggles({ typical: false, weekend: false, custom: false }); }, [weekOffset]);  // --- Save / Clear Per-Week Timezone Override --- const setWeekTimezoneOverride = async (newTz) => { if (!currentUser) return; const sentinelTs = -currentBaseUtc;  setWeekTimezones(prev => { const userMap = { ...(prev[currentUser.id] \vert{}\vert{} {}) }; if (newTz) userMap[currentBaseUtc] = newTz; else delete userMap[currentBaseUtc]; return { ...prev, [currentUser.id]: userMap }; });  try { if (newTz) { await sbFetch('gemba_availabilities', { method: 'POST', body: JSON.stringify([{ user_id: currentUser.id, utc_ts: sentinelTs, state: 'tz_override', week_timezone: newTz, }]), }); } else { await sbFetch(`gemba_availabilities?user_id=eq.${encodeURIComponent(currentUser.id)}&utc_ts=eq.${sentinelTs}`, { method: 'DELETE', }); } } catch { setSyncError('Could not save weekly timezone to EU Cloud.'); } };  // --- ISO 8601 Week Formatting --- const getIsoWeekInfo = (weekMondayUtc) => { const thursday = new Date(weekMondayUtc + 3 * 24 * 3600 * 1000); const isoYear = thursday.getUTCFullYear(); const yearStart = Date.UTC(isoYear, 0, 1); const isoWeek = Math.ceil((((thursday.getTime() - yearStart) / 86400000) + 1) / 7);  const startD = new Date(weekMondayUtc); const endD = new Date(weekMondayUtc + 6 * 24 * 3600 * 1000); const startStr = startD.toLocaleDateString('en-US', { month: 'short', day: 'numeric', timeZone: 'UTC' }); const endStr = endD.toLocaleDateString('en-US', { month: 'short', day: 'numeric', timeZone: 'UTC' });  return { isoWeek: isoWeek.toString().padStart(2, '0'), range: `${startStr} – ${endStr}`, }; };  const weekInfo = (() => { const { isoWeek, range } = getIsoWeekInfo(currentBaseUtc); const relative = weekOffset === 0 ? 'This Week' : weekOffset === 1 ? 'Next Week' : weekOffset === -1 ? 'Last Week' : null; return { primary: `W${isoWeek} • ${range}`, relative, full: relative ? `${relative} (W${isoWeek}:${range})` : `W${isoWeek} (${range})`
+                    className={`w-full text-left px-3 py-2 text-xs flex items-center justify-between hover:bg-indigo-50 transition-colors ${isSelected ? 'bg-indigo-50 text-indigo-700 font-semibold' : 'text-slate-700'}`}
+                  >
+                    <span className="truncate">{formatZoneOptionLabel(tz, refUtcMs)}</span>
+                    {isSelected && <Check className="w-3.5 h-3.5 text-indigo-600 shrink-0" />}
+                  </button>
+                );
+              })
+            )}
+          </div>
+          <div className="px-3 py-1.5 bg-slate-50 border-t border-slate-100 text-[10px] text-slate-500 flex items-center gap-1">
+            <Info className="w-3 h-3 shrink-0" /> Standard IANA database • Daylight Saving Time (DST) is automatic.
+          </div>
+        </div>
+      )}
+    </div>
+  );
+}
+
+export default function App() {
+  const [cohort, setCohort] = useState([]);
+  const [groups, setGroups] = useState([]);
+  const [availabilities, setAvailabilities] = useState({});
+  const [weekTimezones, setWeekTimezones] = useState({}); // { [userId]: { [weekMondayUtc]: 'Europe/Paris' } }
+  const [confirmedMeetings, setConfirmedMeetings] = useState({});
+  const [isSyncing, setIsSyncing] = useState(false);
+  const [syncError, setSyncError] = useState('');
+  const [toastMessage, setToastMessage] = useState('');
+
+  // Auth State
+  const [isAuthenticated, setIsAuthenticated] = useState(false);
+  const [authMode, setAuthMode] = useState('login'); // 'login' | 'signup' | 'reset'
+  const [authEmail, setAuthEmail] = useState('');
+  const [authPassword, setAuthPassword] = useState('');
+  const [authName, setAuthName] = useState('');
+  const [authTimezone, setAuthTimezone] = useState(DETECTED_TIMEZONE);
+  const [authGdprAccepted, setAuthGdprAccepted] = useState(false);
+  const [authError, setAuthError] = useState('');
+  const [authSuccess, setAuthSuccess] = useState('');
+  const [authLoading, setAuthLoading] = useState(false);
+
+  // App State
+  const [currentUserId, setCurrentUserId] = useState(null);
+  const [activeTab, setActiveTab] = useState('avail'); // 'avail' | 'groups' | 'privacy'
+  const [activeGroupId, setActiveGroupId] = useState(null);
+  const [groupTab, setGroupTab] = useState('ranked'); // 'ranked' | 'heatmap' | 'members'
+  const [slotDuration, setSlotDuration] = useState(60); // 60 | 30
+
+  // Week State
+  const [weekOffset, setWeekOffset] = useState(0);
+  const currentBaseUtc = CURRENT_MONDAY + weekOffset * 7 * 24 * 3600 * 1000;
+
+  // Heatmap Override
+  const [heatmapUserId, setHeatmapUserId] = useState(null);
+
+  // Group Creation State
+  const [isCreatingGroup, setIsCreatingGroup] = useState(false);
+  const [newGroupName, setNewGroupName] = useState('');
+  const [newGroupMembers, setNewGroupMembers] = useState([]);
+
+  // Group Editing State (Organizer Only)
+  const [isEditingGroup, setIsEditingGroup] = useState(false);
+  const [editGroupName, setEditGroupName] = useState('');
+  const [editGroupMembers, setEditGroupMembers] = useState([]);
+  const [confirmingDeleteGroup, setConfirmingDeleteGroup] = useState(false);
+
+  // GDPR Account Deletion
+  const [confirmingDelete, setConfirmingDelete] = useState(false);
+  const [privacyNotice, setPrivacyNotice] = useState('');
+
+  // Quick Action Toggles
+  const [toggles, setToggles] = useState({ typical: false, weekend: false, custom: false });
+  const [customPreset, setCustomPreset] = useState([]);
+
+  const currentUser = cohort.find(u => u.id === currentUserId) || null;
+  const activeGroup = groups.find(g => g.id === activeGroupId) || null;
+
+  // Per-week timezone resolution
+  const getUserTimezoneForWeek = useCallback((userObj, weekMondayUtc) => {
+    if (!userObj) return DETECTED_TIMEZONE;
+    return weekTimezones[userObj.id]?.[weekMondayUtc] || userObj.timezone || DETECTED_TIMEZONE;
+  }, [weekTimezones]);
+
+  const currentWeekOverrideTz = currentUser ? (weekTimezones[currentUser.id]?.[currentBaseUtc] || null) : null;
+  const travelModeEnabled = Boolean(currentWeekOverrideTz);
+  const activeTimezone = currentWeekOverrideTz || currentUser?.timezone || DETECTED_TIMEZONE;
+
+  const showToast = (msg) => {
+    setToastMessage(msg);
+    setTimeout(() => setToastMessage(''), 3000);
+  };
+
+  // --- Cloud Sync Loader (Supabase REST) ---
+  const syncFromCloud = useCallback(async (showFeedback = false) => {
+    setIsSyncing(true);
+    setSyncError('');
+    try {
+      const [usersRows, groupsRows, availRows, meetingRows] = await Promise.all([
+        sbFetch('gemba_users?select=*'),
+        sbFetch('gemba_groups?select=*'),
+        sbFetch('gemba_availabilities?select=*'),
+        sbFetch('gemba_meetings?select=*'),
+      ]);
+
+      const mappedUsers = (usersRows || []).map(r => ({
+        id: r.id,
+        name: r.name,
+        email: r.email,
+        passwordHash: r.password_hash,
+        timezone: r.timezone,
+        gdprConsentAt: r.gdpr_consent_at,
+      }));
+      const mappedGroups = (groupsRows || []).map(r => ({
+        id: r.id,
+        name: r.name,
+        adminId: r.admin_id,
+        members: Array.isArray(r.members) ? r.members : [],
+      }));
+      const mappedAvail = {};
+      const mappedWeekTz = {};
+      (availRows || []).forEach(r => {
+        const ts = Number(r.utc_ts);
+        if (r.state === 'tz_override' || ts < 0) {
+          if (r.week_timezone) {
+            if (!mappedWeekTz[r.user_id]) mappedWeekTz[r.user_id] = {};
+            mappedWeekTz[r.user_id][Math.abs(ts)] = r.week_timezone;
+          }
+        } else {
+          if (!mappedAvail[r.user_id]) mappedAvail[r.user_id] = {};
+          mappedAvail[r.user_id][ts] = r.state;
+        }
+      });
+      const mappedMeetings = {};
+      (meetingRows || []).forEach(r => {
+        mappedMeetings[r.group_id] = {
+          utcTimestamp: Number(r.utc_ts),
+          members: Array.isArray(r.members) ? r.members : [],
+        };
+      });
+
+      setCohort(mappedUsers);
+      setGroups(mappedGroups);
+      setAvailabilities(mappedAvail);
+      setWeekTimezones(mappedWeekTz);
+      setConfirmedMeetings(mappedMeetings);
+
+      if (mappedUsers.length === 0 && !isAuthenticated) {
+        setAuthMode('signup');
+      }
+      if (showFeedback) {
+        showToast('Synced latest updates from EU Cloud.');
+      }
+    } catch {
+      setSyncError('Could not reach EU Cloud database. Tap Refresh to retry.');
+    } finally {
+      setIsSyncing(false);
+    }
+  }, [isAuthenticated]);
+
+  useEffect(() => {
+    syncFromCloud(false);
+    const interval = setInterval(() => syncFromCloud(false), 20000);
+    return () => clearInterval(interval);
+  }, [syncFromCloud]);
+
+  useEffect(() => {
+    if (!currentUser) return;
+    setHeatmapUserId(currentUser.id);
+    setConfirmingDelete(false);
+  }, [currentUser?.id]);
+
+  // Reset quick-action toggle labels when switching weeks
+  useEffect(() => {
+    setToggles({ typical: false, weekend: false, custom: false });
+  }, [weekOffset]);
+
+  // --- Save / Clear Per-Week Timezone Override ---
+  const setWeekTimezoneOverride = async (newTz) => {
+    if (!currentUser) return;
+    const sentinelTs = -currentBaseUtc;
+
+    setWeekTimezones(prev => {
+      const userMap = { ...(prev[currentUser.id] || {}) };
+      if (newTz) userMap[currentBaseUtc] = newTz;
+      else delete userMap[currentBaseUtc];
+      return { ...prev, [currentUser.id]: userMap };
+    });
+
+    try {
+      if (newTz) {
+        await sbFetch('gemba_availabilities', {
+          method: 'POST',
+          body: JSON.stringify([{
+            user_id: currentUser.id,
+            utc_ts: sentinelTs,
+            state: 'tz_override',
+            week_timezone: newTz,
+          }]),
+        });
+      } else {
+        await sbFetch(`gemba_availabilities?user_id=eq.${encodeURIComponent(currentUser.id)}&utc_ts=eq.${sentinelTs}`, {
+          method: 'DELETE',
+        });
+      }
+    } catch {
+      setSyncError('Could not save weekly timezone to EU Cloud.');
+    }
+  };
+
+  // --- ISO 8601 Week Formatting ---
+  const getIsoWeekInfo = (weekMondayUtc) => {
+    const thursday = new Date(weekMondayUtc + 3 * 24 * 3600 * 1000);
+    const isoYear = thursday.getUTCFullYear();
+    const yearStart = Date.UTC(isoYear, 0, 1);
+    const isoWeek = Math.ceil((((thursday.getTime() - yearStart) / 86400000) + 1) / 7);
+
+    const startD = new Date(weekMondayUtc);
+    const endD = new Date(weekMondayUtc + 6 * 24 * 3600 * 1000);
+    const startStr = startD.toLocaleDateString('en-US', { month: 'short', day: 'numeric', timeZone: 'UTC' });
+    const endStr = endD.toLocaleDateString('en-US', { month: 'short', day: 'numeric', timeZone: 'UTC' });
+
+    return {
+      isoWeek: isoWeek.toString().padStart(2, '0'),
+      range: `${startStr} – ${endStr}`,
+    };
+  };
+
+  const weekInfo = (() => {
+    const { isoWeek, range } = getIsoWeekInfo(currentBaseUtc);
+    const relative = weekOffset === 0 ? 'This Week' : weekOffset === 1 ? 'Next Week' : weekOffset === -1 ? 'Last Week' : null;
+    return {
+      primary: `W${isoWeek} • ${range}`,
+      relative,
+      full: relative ? `${relative} (W${isoWeek}: ${range})` : `W${isoWeek} (${range})`
     };
   })();
 
@@ -324,7 +623,76 @@ function TimezonePicker({ value, onChange, refUtcMs, placeholder = 'Search city 
           return;
         }
 
-        await sbFetch(`gemba_users?id=eq.${encodeURIComponent(existing.id)}`, { method: 'PATCH', body: JSON.stringify({ password_hash: pwHash }), });  setCohort(prev => prev.map(u => u.id === existing.id ? { ...u, passwordHash: pwHash } : u)); setAuthSuccess('Password updated! You can now sign in with your new password.'); setAuthPassword(''); setAuthMode('login'); } } catch { setAuthError('Could not save to EU Cloud database. Please try again.'); } finally { setAuthLoading(false); } };  // --- Cloud Write Helper for Availability --- const persistAvailabilityChanges = async (userId, upserts, deletes) => { try { if (upserts.length > 0) { await sbFetch('gemba_availabilities', { method: 'POST', body: JSON.stringify( upserts.map(({ utcTs, state }) => ({ user_id: userId, utc_ts: utcTs, state, week_timezone: activeTimezone, })) ), }); } if (deletes.length > 0) { const list = deletes.join(','); await sbFetch(`gemba_availabilities?user_id=eq.${encodeURIComponent(userId)}&utc_ts=in.(${list})`, { method: 'DELETE', }); } } catch { setSyncError('Failed to save availability to EU Cloud. Tap Refresh to retry.'); } };  // --- GDPR Export & Account Deletion --- const handleExportMyData = () => { if (!currentUser) return; const myData = { exportedAt: new Date().toISOString(), profile: { name: currentUser.name, email: currentUser.email, homeTimezone: currentUser.timezone, gdprConsentDate: currentUser.gdprConsentAt \vert{}\vert{} 'N/A', }, weeklyTimezoneOverrides: Object.entries(weekTimezones[currentUser.id] \vert{}\vert{} {}).map(([wkTs, tz]) => ({ weekStartingUtc: new Date(Number(wkTs)).toISOString().split('T')[0], timezone: tz, })), groups: groups.filter(g => g.members.includes(currentUser.id)).map(g => g.name), availabilitySlotsUtc: Object.entries(availabilities[currentUser.id] \vert{}\vert{} {}).map(([ts, state]) => ({ utcIso: new Date(Number(ts)).toISOString(), state, })), }; const blob = new Blob([JSON.stringify(myData, null, 2)], { type: 'application/json' }); const url = URL.createObjectURL(blob); const a = document.createElement('a'); a.href = url; a.download = `timesync-gemba-data-${currentUser.email.split('@')[0]}.json`;
+        await sbFetch(`gemba_users?id=eq.${encodeURIComponent(existing.id)}`, {
+          method: 'PATCH',
+          body: JSON.stringify({ password_hash: pwHash }),
+        });
+
+        setCohort(prev => prev.map(u => u.id === existing.id ? { ...u, passwordHash: pwHash } : u));
+        setAuthSuccess('Password updated! You can now sign in with your new password.');
+        setAuthPassword('');
+        setAuthMode('login');
+      }
+    } catch {
+      setAuthError('Could not save to EU Cloud database. Please try again.');
+    } finally {
+      setAuthLoading(false);
+    }
+  };
+
+  // --- Cloud Write Helper for Availability ---
+  const persistAvailabilityChanges = async (userId, upserts, deletes) => {
+    try {
+      if (upserts.length > 0) {
+        await sbFetch('gemba_availabilities', {
+          method: 'POST',
+          body: JSON.stringify(
+            upserts.map(({ utcTs, state }) => ({
+              user_id: userId,
+              utc_ts: utcTs,
+              state,
+              week_timezone: activeTimezone,
+            }))
+          ),
+        });
+      }
+      if (deletes.length > 0) {
+        const list = deletes.join(',');
+        await sbFetch(`gemba_availabilities?user_id=eq.${encodeURIComponent(userId)}&utc_ts=in.(${list})`, {
+          method: 'DELETE',
+        });
+      }
+    } catch {
+      setSyncError('Failed to save availability to EU Cloud. Tap Refresh to retry.');
+    }
+  };
+
+  // --- GDPR Export & Account Deletion ---
+  const handleExportMyData = () => {
+    if (!currentUser) return;
+    const myData = {
+      exportedAt: new Date().toISOString(),
+      profile: {
+        name: currentUser.name,
+        email: currentUser.email,
+        homeTimezone: currentUser.timezone,
+        gdprConsentDate: currentUser.gdprConsentAt || 'N/A',
+      },
+      weeklyTimezoneOverrides: Object.entries(weekTimezones[currentUser.id] || {}).map(([wkTs, tz]) => ({
+        weekStartingUtc: new Date(Number(wkTs)).toISOString().split('T')[0],
+        timezone: tz,
+      })),
+      groups: groups.filter(g => g.members.includes(currentUser.id)).map(g => g.name),
+      availabilitySlotsUtc: Object.entries(availabilities[currentUser.id] || {}).map(([ts, state]) => ({
+        utcIso: new Date(Number(ts)).toISOString(),
+        state,
+      })),
+    };
+    const blob = new Blob([JSON.stringify(myData, null, 2)], { type: 'application/json' });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.href = url;
+    a.download = `timesync-gemba-data-${currentUser.email.split('@')[0]}.json`;
     a.click();
     URL.revokeObjectURL(url);
     setPrivacyNotice('Your personal data export (JSON) has been downloaded.');
@@ -334,11 +702,246 @@ function TimezonePicker({ value, onChange, refUtcMs, placeholder = 'Search city 
     if (!currentUser) return;
     const idToDelete = currentUser.id;
     try {
-      await sbFetch(`gemba_availabilities?user_id=eq.${encodeURIComponent(idToDelete)}`, { method: 'DELETE' }); await sbFetch(`gemba_users?id=eq.${encodeURIComponent(idToDelete)}`, { method: 'DELETE' });
+      await sbFetch(`gemba_availabilities?user_id=eq.${encodeURIComponent(idToDelete)}`, { method: 'DELETE' });
+      await sbFetch(`gemba_users?id=eq.${encodeURIComponent(idToDelete)}`, { method: 'DELETE' });
       const affectedGroups = groups.filter(g => g.members.includes(idToDelete));
       await Promise.all(
         affectedGroups.map(g =>
-          sbFetch(`gemba_groups?id=eq.${encodeURIComponent(g.id)}`, { method: 'PATCH', body: JSON.stringify({ members: g.members.filter(mId => mId !== idToDelete) }), }) ) ); } catch { setPrivacyNotice('Could not complete cloud deletion. Please try again.'); return; }  setAvailabilities(prev => { const next = { ...prev }; delete next[idToDelete]; return next; }); setWeekTimezones(prev => { const next = { ...prev }; delete next[idToDelete]; return next; }); setGroups(prev => prev.map(g => ({ ...g, members: g.members.filter(mId => mId !== idToDelete) }))); setConfirmedMeetings(prev => { const next = {}; for (const [gId, m] of Object.entries(prev)) { next[gId] = { ...m, members: m.members.filter(mId => mId !== idToDelete) }; } return next; }); const remaining = cohort.filter(u => u.id !== idToDelete); setCohort(remaining); setCurrentUserId(null); setActiveGroupId(null); setIsEditingGroup(false); setConfirmingDelete(false); setIsAuthenticated(false); setAuthMode(remaining.length === 0 ? 'signup' : 'login'); setAuthSuccess('Your account and all associated scheduling data have been permanently deleted.'); };  // --- Scheduling & Grid Helpers --- const getUserConfirmedMeeting = (userId, utcTimestamp) => { for (const [groupId, meeting] of Object.entries(confirmedMeetings)) { if (meeting.utcTimestamp === utcTimestamp && meeting.members.includes(userId)) { return groups.find(g => g.id === groupId); } } return null; };  const generateGrid = (timeZone, baseUtc, durationMin = 60) => { const grid = []; const minsList = durationMin === 30 ? [0, 30] : [0]; for (let dayIdx = 0; dayIdx < 7; dayIdx++) { const dayDate = new Date(baseUtc + dayIdx * 24 * 3600 * 1000); const y = dayDate.getUTCFullYear(); const m = dayDate.getUTCMonth(); const dt = dayDate.getUTCDate(); const slots = []; GRID_HOURS.forEach(h => { minsList.forEach(min => { slots.push({ localHour: h, localMinute: min, label: `${h.toString().padStart(2, '0')}:${min.toString().padStart(2, '0')}`, utcTimestamp: localToUtcMs(y, m, dt, h, min, timeZone), }); }); }); grid.push({ dayName: DAYS[dayIdx], dateStr: dt, slots }); } return grid; };  const cycleState = (utcTimestamp) => { if (!currentUser) return; if (getUserConfirmedMeeting(currentUser.id, utcTimestamp)) return; const current = availabilities[currentUser.id]?.[utcTimestamp] \vert{}\vert{} 'unavailable'; let nextState = null; if (current === 'unavailable') nextState = 'available'; else if (current === 'available') nextState = 'preferred';  setAvailabilities(prev => { const userAvail = { ...(prev[currentUser.id] \vert{}\vert{} {}) }; if (nextState) userAvail[utcTimestamp] = nextState; else delete userAvail[utcTimestamp]; return { ...prev, [currentUser.id]: userAvail }; });  if (nextState) { persistAvailabilityChanges(currentUser.id, [{ utcTs: utcTimestamp, state: nextState }], []); } else { persistAvailabilityChanges(currentUser.id, [], [utcTimestamp]); } };  const applyLocalPattern = (conditionFn, isAdding) => { if (!currentUser) return; const grid = generateGrid(activeTimezone, currentBaseUtc, slotDuration); const upserts = []; const deletes = [];  setAvailabilities(prev => { const userAvail = { ...(prev[currentUser.id] \vert{}\vert{} {}) }; grid.forEach((day, dayIdx) => { day.slots.forEach(slot => { if (conditionFn(dayIdx, slot.localHour)) { if (isAdding) { userAvail[slot.utcTimestamp] = 'available'; upserts.push({ utcTs: slot.utcTimestamp, state: 'available' }); } else { delete userAvail[slot.utcTimestamp]; deletes.push(slot.utcTimestamp); } } }); }); return { ...prev, [currentUser.id]: userAvail }; });  persistAvailabilityChanges(currentUser.id, upserts, deletes); };  const clearWeek = () => { if (!currentUser) return; const grid = generateGrid(activeTimezone, currentBaseUtc, 30); const deletes = []; setAvailabilities(prev => { const userAvail = { ...(prev[currentUser.id] \vert{}\vert{} {}) }; grid.forEach(day => { day.slots.forEach(slot => { if (userAvail[slot.utcTimestamp]) { delete userAvail[slot.utcTimestamp]; deletes.push(slot.utcTimestamp); } }); }); return { ...prev, [currentUser.id]: userAvail }; }); setToggles({ typical: false, weekend: false, custom: false }); persistAvailabilityChanges(currentUser.id, [], deletes); };  const isFriSatWeekend = FRI_SAT_WEEKEND_ZONES.has(activeTimezone);  const toggleTypical = () => { const isAdding = !toggles.typical; applyLocalPattern((dayIdx, h) => { const isWeekend = isFriSatWeekend ? (dayIdx === 4 \vert{}\vert{} dayIdx === 5) : (dayIdx === 5 \vert{}\vert{} dayIdx === 6); return !isWeekend && h >= 18 && h < 22; }, isAdding); setToggles(prev => ({ ...prev, typical: isAdding })); };  const toggleWeekend = () => { const isAdding = !toggles.weekend; applyLocalPattern((dayIdx, h) => { const isWeekend = isFriSatWeekend ? (dayIdx === 4 \vert{}\vert{} dayIdx === 5) : (dayIdx === 5 \vert{}\vert{} dayIdx === 6); return isWeekend && h >= 9 && h < 17; }, isAdding); setToggles(prev => ({ ...prev, weekend: isAdding })); };  const toggleCustom = () => { if (!currentUser \vert{}\vert{} customPreset.length === 0) return; const isAdding = !toggles.custom; const grid = generateGrid(activeTimezone, currentBaseUtc, slotDuration); const upserts = []; const deletes = [];  setAvailabilities(prev => { const userAvail = { ...(prev[currentUser.id] \vert{}\vert{} {}) }; customPreset.forEach(({ dayIdx, hour, minute }) => { const slot = grid[dayIdx]?.slots.find(s => s.localHour === hour && s.localMinute === minute); if (slot) { if (isAdding) { userAvail[slot.utcTimestamp] = 'available'; upserts.push({ utcTs: slot.utcTimestamp, state: 'available' }); } else { delete userAvail[slot.utcTimestamp]; deletes.push(slot.utcTimestamp); } } }); return { ...prev, [currentUser.id]: userAvail }; }); setToggles(prev => ({ ...prev, custom: isAdding })); persistAvailabilityChanges(currentUser.id, upserts, deletes); };  const saveCustomPreset = () => { if (!currentUser) return; const userAvail = availabilities[currentUser.id] \vert{}\vert{} {}; const grid = generateGrid(activeTimezone, currentBaseUtc, slotDuration); const saved = []; grid.forEach((day, dayIdx) => { day.slots.forEach(slot => { if (userAvail[slot.utcTimestamp] && userAvail[slot.utcTimestamp] !== 'unavailable') { saved.push({ dayIdx, hour: slot.localHour, minute: slot.localMinute }); } }); }); setCustomPreset(saved); setToggles(prev => ({ ...prev, custom: true })); showToast('Custom preset saved!'); };  // --- Group CRUD Handlers --- const handleCreateGroup = async () => { if (!currentUser \vert{}\vert{} !newGroupName.trim() \vert{}\vert{} newGroupMembers.length === 0) return; const newGroup = { id: 'g_' + Date.now() + '_' + Math.random().toString(36).slice(2, 5), name: newGroupName.trim(), adminId: currentUser.id, members: newGroupMembers, };  try { await sbFetch('gemba_groups', { method: 'POST', body: JSON.stringify({ id: newGroup.id, name: newGroup.name, admin_id: newGroup.adminId, members: newGroup.members, }), }); setGroups(prev => [...prev, newGroup]); setIsCreatingGroup(false); setNewGroupName(''); setNewGroupMembers([currentUser.id]); showToast(`Group "${newGroup.name}" created!`);
+          sbFetch(`gemba_groups?id=eq.${encodeURIComponent(g.id)}`, {
+            method: 'PATCH',
+            body: JSON.stringify({ members: g.members.filter(mId => mId !== idToDelete) }),
+          })
+        )
+      );
+    } catch {
+      setPrivacyNotice('Could not complete cloud deletion. Please try again.');
+      return;
+    }
+
+    setAvailabilities(prev => {
+      const next = { ...prev };
+      delete next[idToDelete];
+      return next;
+    });
+    setWeekTimezones(prev => {
+      const next = { ...prev };
+      delete next[idToDelete];
+      return next;
+    });
+    setGroups(prev => prev.map(g => ({
+      ...g,
+      members: g.members.filter(mId => mId !== idToDelete)
+    })));
+    setConfirmedMeetings(prev => {
+      const next = {};
+      for (const [gId, m] of Object.entries(prev)) {
+        next[gId] = { ...m, members: m.members.filter(mId => mId !== idToDelete) };
+      }
+      return next;
+    });
+    const remaining = cohort.filter(u => u.id !== idToDelete);
+    setCohort(remaining);
+    setCurrentUserId(null);
+    setActiveGroupId(null);
+    setIsEditingGroup(false);
+    setConfirmingDelete(false);
+    setIsAuthenticated(false);
+    setAuthMode(remaining.length === 0 ? 'signup' : 'login');
+    setAuthSuccess('Your account and all associated scheduling data have been permanently deleted.');
+  };
+
+  // --- Scheduling & Grid Helpers ---
+  const getUserConfirmedMeeting = (userId, utcTimestamp) => {
+    for (const [groupId, meeting] of Object.entries(confirmedMeetings)) {
+      if (meeting.utcTimestamp === utcTimestamp && meeting.members.includes(userId)) {
+        return groups.find(g => g.id === groupId);
+      }
+    }
+    return null;
+  };
+
+  const generateGrid = (timeZone, baseUtc, durationMin = 60) => {
+    const grid = [];
+    const minsList = durationMin === 30 ? [0, 30] : [0];
+    for (let dayIdx = 0; dayIdx < 7; dayIdx++) {
+      const dayDate = new Date(baseUtc + dayIdx * 24 * 3600 * 1000);
+      const y = dayDate.getUTCFullYear();
+      const m = dayDate.getUTCMonth();
+      const dt = dayDate.getUTCDate();
+      const slots = [];
+      GRID_HOURS.forEach(h => {
+        minsList.forEach(min => {
+          slots.push({
+            localHour: h,
+            localMinute: min,
+            label: `${h.toString().padStart(2, '0')}:${min.toString().padStart(2, '0')}`,
+            utcTimestamp: localToUtcMs(y, m, dt, h, min, timeZone),
+          });
+        });
+      });
+      grid.push({ dayName: DAYS[dayIdx], dateStr: dt, slots });
+    }
+    return grid;
+  };
+
+  const cycleState = (utcTimestamp) => {
+    if (!currentUser) return;
+    if (getUserConfirmedMeeting(currentUser.id, utcTimestamp)) return;
+    const current = availabilities[currentUser.id]?.[utcTimestamp] || 'unavailable';
+    let nextState = null;
+    if (current === 'unavailable') nextState = 'available';
+    else if (current === 'available') nextState = 'preferred';
+
+    setAvailabilities(prev => {
+      const userAvail = { ...(prev[currentUser.id] || {}) };
+      if (nextState) userAvail[utcTimestamp] = nextState;
+      else delete userAvail[utcTimestamp];
+      return { ...prev, [currentUser.id]: userAvail };
+    });
+
+    if (nextState) {
+      persistAvailabilityChanges(currentUser.id, [{ utcTs: utcTimestamp, state: nextState }], []);
+    } else {
+      persistAvailabilityChanges(currentUser.id, [], [utcTimestamp]);
+    }
+  };
+
+  const applyLocalPattern = (conditionFn, isAdding) => {
+    if (!currentUser) return;
+    const grid = generateGrid(activeTimezone, currentBaseUtc, slotDuration);
+    const upserts = [];
+    const deletes = [];
+
+    setAvailabilities(prev => {
+      const userAvail = { ...(prev[currentUser.id] || {}) };
+      grid.forEach((day, dayIdx) => {
+        day.slots.forEach(slot => {
+          if (conditionFn(dayIdx, slot.localHour)) {
+            if (isAdding) {
+              userAvail[slot.utcTimestamp] = 'available';
+              upserts.push({ utcTs: slot.utcTimestamp, state: 'available' });
+            } else {
+              delete userAvail[slot.utcTimestamp];
+              deletes.push(slot.utcTimestamp);
+            }
+          }
+        });
+      });
+      return { ...prev, [currentUser.id]: userAvail };
+    });
+
+    persistAvailabilityChanges(currentUser.id, upserts, deletes);
+  };
+
+  const clearWeek = () => {
+    if (!currentUser) return;
+    const grid = generateGrid(activeTimezone, currentBaseUtc, 30);
+    const deletes = [];
+    setAvailabilities(prev => {
+      const userAvail = { ...(prev[currentUser.id] || {}) };
+      grid.forEach(day => {
+        day.slots.forEach(slot => {
+          if (userAvail[slot.utcTimestamp]) {
+            delete userAvail[slot.utcTimestamp];
+            deletes.push(slot.utcTimestamp);
+          }
+        });
+      });
+      return { ...prev, [currentUser.id]: userAvail };
+    });
+    setToggles({ typical: false, weekend: false, custom: false });
+    persistAvailabilityChanges(currentUser.id, [], deletes);
+  };
+
+  const isFriSatWeekend = FRI_SAT_WEEKEND_ZONES.has(activeTimezone);
+
+  const toggleTypical = () => {
+    const isAdding = !toggles.typical;
+    applyLocalPattern((dayIdx, h) => {
+      const isWeekend = isFriSatWeekend ? (dayIdx === 4 || dayIdx === 5) : (dayIdx === 5 || dayIdx === 6);
+      return !isWeekend && h >= 18 && h < 22;
+    }, isAdding);
+    setToggles(prev => ({ ...prev, typical: isAdding }));
+  };
+
+  const toggleWeekend = () => {
+    const isAdding = !toggles.weekend;
+    applyLocalPattern((dayIdx, h) => {
+      const isWeekend = isFriSatWeekend ? (dayIdx === 4 || dayIdx === 5) : (dayIdx === 5 || dayIdx === 6);
+      return isWeekend && h >= 9 && h < 17;
+    }, isAdding);
+    setToggles(prev => ({ ...prev, weekend: isAdding }));
+  };
+
+  const toggleCustom = () => {
+    if (!currentUser || customPreset.length === 0) return;
+    const isAdding = !toggles.custom;
+    const grid = generateGrid(activeTimezone, currentBaseUtc, slotDuration);
+    const upserts = [];
+    const deletes = [];
+
+    setAvailabilities(prev => {
+      const userAvail = { ...(prev[currentUser.id] || {}) };
+      customPreset.forEach(({ dayIdx, hour, minute }) => {
+        const slot = grid[dayIdx]?.slots.find(s => s.localHour === hour && s.localMinute === minute);
+        if (slot) {
+          if (isAdding) {
+            userAvail[slot.utcTimestamp] = 'available';
+            upserts.push({ utcTs: slot.utcTimestamp, state: 'available' });
+          } else {
+            delete userAvail[slot.utcTimestamp];
+            deletes.push(slot.utcTimestamp);
+          }
+        }
+      });
+      return { ...prev, [currentUser.id]: userAvail };
+    });
+    setToggles(prev => ({ ...prev, custom: isAdding }));
+    persistAvailabilityChanges(currentUser.id, upserts, deletes);
+  };
+
+  const saveCustomPreset = () => {
+    if (!currentUser) return;
+    const userAvail = availabilities[currentUser.id] || {};
+    const grid = generateGrid(activeTimezone, currentBaseUtc, slotDuration);
+    const saved = [];
+    grid.forEach((day, dayIdx) => {
+      day.slots.forEach(slot => {
+        if (userAvail[slot.utcTimestamp] && userAvail[slot.utcTimestamp] !== 'unavailable') {
+          saved.push({ dayIdx, hour: slot.localHour, minute: slot.localMinute });
+        }
+      });
+    });
+    setCustomPreset(saved);
+    setToggles(prev => ({ ...prev, custom: true }));
+    showToast('Custom preset saved!');
+  };
+
+  // --- Group CRUD Handlers ---
+  const handleCreateGroup = async () => {
+    if (!currentUser || !newGroupName.trim() || newGroupMembers.length === 0) return;
+    const newGroup = {
+      id: 'g_' + Date.now() + '_' + Math.random().toString(36).slice(2, 5),
+      name: newGroupName.trim(),
+      adminId: currentUser.id,
+      members: newGroupMembers,
+    };
+
+    try {
+      await sbFetch('gemba_groups', {
+        method: 'POST',
+        body: JSON.stringify({
+          id: newGroup.id,
+          name: newGroup.name,
+          admin_id: newGroup.adminId,
+          members: newGroup.members,
+        }),
+      });
+      setGroups(prev => [...prev, newGroup]);
+      setIsCreatingGroup(false);
+      setNewGroupName('');
+      setNewGroupMembers([currentUser.id]);
+      showToast(`Group "${newGroup.name}" created!`);
     } catch {
       setSyncError('Could not save group to EU Cloud.');
     }
@@ -357,7 +960,16 @@ function TimezonePicker({ value, onChange, refUtcMs, placeholder = 'Search city 
     const updatedMembers = Array.from(new Set([...editGroupMembers, currentUser.id]));
 
     try {
-      await sbFetch(`gemba_groups?id=eq.${encodeURIComponent(activeGroup.id)}`, { method: 'PATCH', body: JSON.stringify({ name: trimmedName, members: updatedMembers, }), });  if (confirmedMeetings[activeGroup.id]) { await sbFetch(`gemba_meetings?group_id=eq.${encodeURIComponent(activeGroup.id)}`, {
+      await sbFetch(`gemba_groups?id=eq.${encodeURIComponent(activeGroup.id)}`, {
+        method: 'PATCH',
+        body: JSON.stringify({
+          name: trimmedName,
+          members: updatedMembers,
+        }),
+      });
+
+      if (confirmedMeetings[activeGroup.id]) {
+        await sbFetch(`gemba_meetings?group_id=eq.${encodeURIComponent(activeGroup.id)}`, {
           method: 'PATCH',
           body: JSON.stringify({ members: updatedMembers }),
         });
@@ -371,8 +983,31 @@ function TimezonePicker({ value, onChange, refUtcMs, placeholder = 'Search city 
         prev.map(g => g.id === activeGroup.id ? { ...g, name: trimmedName, members: updatedMembers } : g)
       );
       setIsEditingGroup(false);
-      showToast(`Group "${trimmedName}" updated!`); } catch { setSyncError('Could not update group in EU Cloud.'); } };  const handleDeleteGroup = async () => { if (!activeGroup) return; const groupId = activeGroup.id; const groupName = activeGroup.name;  try { await sbFetch(`gemba_meetings?group_id=eq.${encodeURIComponent(groupId)}`, { method: 'DELETE' });
-      await sbFetch(`gemba_groups?id=eq.${encodeURIComponent(groupId)}`, { method: 'DELETE' });  setGroups(prev => prev.filter(g => g.id !== groupId)); setConfirmedMeetings(prev => { const next = { ...prev }; delete next[groupId]; return next; }); setIsEditingGroup(false); setConfirmingDeleteGroup(false); setActiveGroupId(null); showToast(`Group "${groupName}" deleted.`);
+      showToast(`Group "${trimmedName}" updated!`);
+    } catch {
+      setSyncError('Could not update group in EU Cloud.');
+    }
+  };
+
+  const handleDeleteGroup = async () => {
+    if (!activeGroup) return;
+    const groupId = activeGroup.id;
+    const groupName = activeGroup.name;
+
+    try {
+      await sbFetch(`gemba_meetings?group_id=eq.${encodeURIComponent(groupId)}`, { method: 'DELETE' });
+      await sbFetch(`gemba_groups?id=eq.${encodeURIComponent(groupId)}`, { method: 'DELETE' });
+
+      setGroups(prev => prev.filter(g => g.id !== groupId));
+      setConfirmedMeetings(prev => {
+        const next = { ...prev };
+        delete next[groupId];
+        return next;
+      });
+      setIsEditingGroup(false);
+      setConfirmingDeleteGroup(false);
+      setActiveGroupId(null);
+      showToast(`Group "${groupName}" deleted.`);
     } catch {
       setSyncError('Could not delete group from EU Cloud.');
     }
@@ -398,7 +1033,34 @@ function TimezonePicker({ value, onChange, refUtcMs, placeholder = 'Search city 
 
   const handleUnconfirmMeeting = async (groupId) => {
     try {
-      await sbFetch(`gemba_meetings?group_id=eq.${encodeURIComponent(groupId)}`, { method: 'DELETE', }); setConfirmedMeetings(prev => { const next = { ...prev }; delete next[groupId]; return next; }); showToast('Meeting unlocked for re-scheduling.'); } catch { setSyncError('Could not unconfirm meeting in EU Cloud.'); } };  const handleCopyInviteLink = () => { const url = typeof window !== 'undefined' ? window.location.href : ''; const copied = copyTextSafe(url); showToast(copied ? 'App link copied! Share it with your GEMBA teammates.' : 'Share this page URL with your GEMBA teammates.'); };  const formatTimeForZoneFull = (utcTimestamp, timeZone) => { const p = getLocalParts(utcTimestamp, timeZone); return `${p.weekday}, ${p.month}${p.day} • ${p.hourStr}:${p.minuteStr} ${p.tzAbbr}`; };  const formatTimeForZoneShort = (utcTimestamp, timeZone) => { const p = getLocalParts(utcTimestamp, timeZone); return `${p.hourStr}:${p.minuteStr}${p.tzAbbr}`;
+      await sbFetch(`gemba_meetings?group_id=eq.${encodeURIComponent(groupId)}`, {
+        method: 'DELETE',
+      });
+      setConfirmedMeetings(prev => {
+        const next = { ...prev };
+        delete next[groupId];
+        return next;
+      });
+      showToast('Meeting unlocked for re-scheduling.');
+    } catch {
+      setSyncError('Could not unconfirm meeting in EU Cloud.');
+    }
+  };
+
+  const handleCopyInviteLink = () => {
+    const url = typeof window !== 'undefined' ? window.location.href : '';
+    const copied = copyTextSafe(url);
+    showToast(copied ? 'App link copied! Share it with your GEMBA teammates.' : 'Share this page URL with your GEMBA teammates.');
+  };
+
+  const formatTimeForZoneFull = (utcTimestamp, timeZone) => {
+    const p = getLocalParts(utcTimestamp, timeZone);
+    return `${p.weekday}, ${p.month} ${p.day} • ${p.hourStr}:${p.minuteStr} ${p.tzAbbr}`;
+  };
+
+  const formatTimeForZoneShort = (utcTimestamp, timeZone) => {
+    const p = getLocalParts(utcTimestamp, timeZone);
+    return `${p.hourStr}:${p.minuteStr} ${p.tzAbbr}`;
   };
 
   // --- Overlap Engine (uses each member's timezone for the active week) ---
@@ -487,7 +1149,14 @@ function TimezonePicker({ value, onChange, refUtcMs, placeholder = 'Search city 
             <button
               type="button"
               onClick={() => { setAuthMode('login'); setAuthError(''); setAuthSuccess(''); }}
-              className={`flex-1 py-3 transition-colors ${authMode === 'login' ? 'text-indigo-600 border-b-2 border-indigo-600 bg-white' : 'text-slate-500 hover:text-slate-700'}`} > Sign In </button> <button type="button" onClick={() => { setAuthMode('signup'); setAuthError(''); setAuthSuccess(''); }} className={`flex-1 py-3 transition-colors ${authMode === 'signup' ? 'text-indigo-600 border-b-2 border-indigo-600 bg-white' : 'text-slate-500 hover:text-slate-700'}`}
+              className={`flex-1 py-3 transition-colors ${authMode === 'login' ? 'text-indigo-600 border-b-2 border-indigo-600 bg-white' : 'text-slate-500 hover:text-slate-700'}`}
+            >
+              Sign In
+            </button>
+            <button
+              type="button"
+              onClick={() => { setAuthMode('signup'); setAuthError(''); setAuthSuccess(''); }}
+              className={`flex-1 py-3 transition-colors ${authMode === 'signup' ? 'text-indigo-600 border-b-2 border-indigo-600 bg-white' : 'text-slate-500 hover:text-slate-700'}`}
             >
               Create Account
             </button>
@@ -656,7 +1325,66 @@ function TimezonePicker({ value, onChange, refUtcMs, placeholder = 'Search city 
             title="Refresh latest cohort updates"
             className="p-2 bg-slate-800 hover:bg-slate-700 text-slate-300 hover:text-white rounded transition-colors flex items-center gap-1 text-xs"
           >
-            <RefreshCw className={`w-4 h-4 ${isSyncing ? 'animate-spin text-indigo-400' : ''}`} /> <span className="hidden sm:inline">Refresh</span> </button> <button onClick={handleCopyInviteLink} title="Copy invite link for teammates" className="p-2 bg-slate-800 hover:bg-slate-700 text-slate-300 hover:text-white rounded transition-colors flex items-center gap-1 text-xs" > <Share2 className="w-4 h-4" /> <span className="hidden sm:inline">Invite</span> </button> <button onClick={() => { setIsAuthenticated(false); setActiveGroupId(null); setIsEditingGroup(false); }} title="Sign Out" className="p-2 bg-slate-800 hover:bg-slate-700 text-slate-300 hover:text-white rounded transition-colors" > <LogOut className="w-4 h-4" /> </button> </div> </header>  {syncError && ( <div className="bg-red-50 border-b border-red-200 text-red-700 text-xs px-4 py-2 flex items-center justify-between"> <span className="flex items-center gap-1.5"><AlertCircle className="w-4 h-4 shrink-0" /> {syncError}</span> <button onClick={() => setSyncError('')} className="text-red-500 hover:text-red-800"><X className="w-4 h-4" /></button> </div> )}  {/* Global ISO 8601 Week Navigator */} <div className="bg-slate-800 text-slate-200 px-4 py-2.5 flex items-center justify-between text-sm shadow-inner z-10 shrink-0 border-t border-slate-700"> <button onClick={() => setWeekOffset(w => w - 1)} className="px-2 py-1 hover:bg-slate-700 hover:text-white rounded flex items-center gap-1 transition-colors"> <ChevronLeft className="w-4 h-4" /> Prev </button> <div className="flex flex-col sm:flex-row items-center gap-1 sm:gap-2 text-center"> <div className="font-semibold text-white flex items-center gap-1.5"> <Calendar className="w-4 h-4 text-indigo-400" /> <span>{weekInfo.primary}</span> </div> {weekInfo.relative && ( <span className="text-[10px] font-bold uppercase tracking-wider bg-indigo-500/30 text-indigo-200 px-2 py-0.5 rounded-full border border-indigo-400/30"> {weekInfo.relative} </span> )} </div> <button onClick={() => setWeekOffset(w => w + 1)} className="px-2 py-1 hover:bg-slate-700 hover:text-white rounded flex items-center gap-1 transition-colors"> Next <ChevronRight className="w-4 h-4" /> </button> </div>  {/* TAB 1: MY AVAIL */} {activeTab === 'avail' && ( <div className="flex-1 flex flex-col overflow-hidden bg-white"> <div className="bg-blue-50 border-b border-blue-100 p-3 px-4 flex flex-col gap-2 shrink-0"> <div className="flex items-center justify-between gap-2"> <div className="flex items-center gap-1.5 text-blue-900 font-semibold text-xs sm:text-sm"> <MapPin className="w-4 h-4 text-blue-600 shrink-0" /> <span> {travelModeEnabled ? `Traveling (${weekInfo.primary.split(' • ')[0]}): ${activeTimezone.replace(/_/g, ' ')}` : `Home: ${currentUser.timezone.replace(/_/g, ' ')}`}
+            <RefreshCw className={`w-4 h-4 ${isSyncing ? 'animate-spin text-indigo-400' : ''}`} />
+            <span className="hidden sm:inline">Refresh</span>
+          </button>
+          <button
+            onClick={handleCopyInviteLink}
+            title="Copy invite link for teammates"
+            className="p-2 bg-slate-800 hover:bg-slate-700 text-slate-300 hover:text-white rounded transition-colors flex items-center gap-1 text-xs"
+          >
+            <Share2 className="w-4 h-4" />
+            <span className="hidden sm:inline">Invite</span>
+          </button>
+          <button
+            onClick={() => { setIsAuthenticated(false); setActiveGroupId(null); setIsEditingGroup(false); }}
+            title="Sign Out"
+            className="p-2 bg-slate-800 hover:bg-slate-700 text-slate-300 hover:text-white rounded transition-colors"
+          >
+            <LogOut className="w-4 h-4" />
+          </button>
+        </div>
+      </header>
+
+      {syncError && (
+        <div className="bg-red-50 border-b border-red-200 text-red-700 text-xs px-4 py-2 flex items-center justify-between">
+          <span className="flex items-center gap-1.5"><AlertCircle className="w-4 h-4 shrink-0" /> {syncError}</span>
+          <button onClick={() => setSyncError('')} className="text-red-500 hover:text-red-800"><X className="w-4 h-4" /></button>
+        </div>
+      )}
+
+      {/* Global ISO 8601 Week Navigator */}
+      <div className="bg-slate-800 text-slate-200 px-4 py-2.5 flex items-center justify-between text-sm shadow-inner z-10 shrink-0 border-t border-slate-700">
+        <button onClick={() => setWeekOffset(w => w - 1)} className="px-2 py-1 hover:bg-slate-700 hover:text-white rounded flex items-center gap-1 transition-colors">
+          <ChevronLeft className="w-4 h-4" /> Prev
+        </button>
+        <div className="flex flex-col sm:flex-row items-center gap-1 sm:gap-2 text-center">
+          <div className="font-semibold text-white flex items-center gap-1.5">
+            <Calendar className="w-4 h-4 text-indigo-400" />
+            <span>{weekInfo.primary}</span>
+          </div>
+          {weekInfo.relative && (
+            <span className="text-[10px] font-bold uppercase tracking-wider bg-indigo-500/30 text-indigo-200 px-2 py-0.5 rounded-full border border-indigo-400/30">
+              {weekInfo.relative}
+            </span>
+          )}
+        </div>
+        <button onClick={() => setWeekOffset(w => w + 1)} className="px-2 py-1 hover:bg-slate-700 hover:text-white rounded flex items-center gap-1 transition-colors">
+          Next <ChevronRight className="w-4 h-4" />
+        </button>
+      </div>
+
+      {/* TAB 1: MY AVAIL */}
+      {activeTab === 'avail' && (
+        <div className="flex-1 flex flex-col overflow-hidden bg-white">
+          <div className="bg-blue-50 border-b border-blue-100 p-3 px-4 flex flex-col gap-2 shrink-0">
+            <div className="flex items-center justify-between gap-2">
+              <div className="flex items-center gap-1.5 text-blue-900 font-semibold text-xs sm:text-sm">
+                <MapPin className="w-4 h-4 text-blue-600 shrink-0" />
+                <span>
+                  {travelModeEnabled
+                    ? `Traveling (${weekInfo.primary.split(' • ')[0]}): ${activeTimezone.replace(/_/g, ' ')}`
+                    : `Home: ${currentUser.timezone.replace(/_/g, ' ')}`}
                 </span>
               </div>
               <label className="inline-flex items-center gap-2 cursor-pointer text-xs font-semibold text-blue-800 shrink-0">
@@ -738,7 +1466,16 @@ function TimezonePicker({ value, onChange, refUtcMs, placeholder = 'Search city 
                 </button>
                 <button
                   onClick={() => setSlotDuration(30)}
-                  className={`px-2.5 py-1 rounded-md transition-colors ${slotDuration === 30 ? 'bg-indigo-600 text-white' : 'text-slate-500 hover:text-slate-800'}`} > 30m Slots </button> </div> </div> </div>  <main className="flex-1 overflow-auto bg-white relative"> <div className={`${slotDuration === 30 ? 'min-w-[1200px]' : 'min-w-[740px]'} h-full flex flex-col`}>
+                  className={`px-2.5 py-1 rounded-md transition-colors ${slotDuration === 30 ? 'bg-indigo-600 text-white' : 'text-slate-500 hover:text-slate-800'}`}
+                >
+                  30m Slots
+                </button>
+              </div>
+            </div>
+          </div>
+
+          <main className="flex-1 overflow-auto bg-white relative">
+            <div className={`${slotDuration === 30 ? 'min-w-[1200px]' : 'min-w-[740px]'} h-full flex flex-col`}>
               <div className="flex sticky top-0 bg-slate-50 border-b border-slate-200 z-10">
                 <div className="w-16 flex-none border-r border-slate-200"></div>
                 <div className="flex-1 flex text-[10px] text-slate-400 uppercase tracking-wider font-semibold">
@@ -770,7 +1507,7 @@ function TimezonePicker({ value, onChange, refUtcMs, placeholder = 'Search city 
                         return (
                           <div
                             key={slot.utcTimestamp}
-                            title={confirmedGroup ? `Confirmed Meeting: ${confirmedGroup.name}` : `${day.dayName}${slot.label}`}
+                            title={confirmedGroup ? `Confirmed Meeting: ${confirmedGroup.name}` : `${day.dayName} ${slot.label}`}
                             onPointerDown={() => cycleState(slot.utcTimestamp)}
                             className={`flex-1 h-10 border rounded-sm cursor-pointer transition-colors hover:brightness-95 active:scale-95 ${bgColor}`}
                           >
@@ -1127,5 +1864,308 @@ function TimezonePicker({ value, onChange, refUtcMs, placeholder = 'Search city 
                           {isGroupAdmin ? (
                             <button
                               onClick={() => handleConfirmMeeting(activeGroup, slot.utcTimestamp)}
-                              className={`w-full py-3 px-4 font-semibold rounded-lg transition-colors text-sm text-center shadow-sm flex items-center justify-center gap-2 ${idx === 0 ? 'bg-indigo-600 hover:bg-indigo-700 text-white' : 'bg-slate-100 text-slate-700 hover:bg-slate-200'}`} > <Check className="w-4 h-4" strokeWidth={3} /> Confirm Meeting </button> ) : ( <div className="text-xs text-slate-400 bg-slate-50 border border-slate-100 rounded-lg p-2.5 text-center"> Only the group organizer can confirm the final slot. </div> )} </div>  <div className={`p-4 sm:w-64 border-t sm:border-t-0 sm:border-l ${idx === 0 ? 'border-indigo-200 bg-indigo-50/40' : 'border-slate-100 bg-slate-50/50'} text-sm overflow-y-auto max-h-52 sm:max-h-none`}>
-                          <div className={`font-semibold mb-3 text-xs uppercase
+                              className={`w-full py-3 px-4 font-semibold rounded-lg transition-colors text-sm text-center shadow-sm flex items-center justify-center gap-2 ${idx === 0 ? 'bg-indigo-600 hover:bg-indigo-700 text-white' : 'bg-slate-100 text-slate-700 hover:bg-slate-200'}`}
+                            >
+                              <Check className="w-4 h-4" strokeWidth={3} /> Confirm Meeting
+                            </button>
+                          ) : (
+                            <div className="text-xs text-slate-400 bg-slate-50 border border-slate-100 rounded-lg p-2.5 text-center">
+                              Only the group organizer can confirm the final slot.
+                            </div>
+                          )}
+                        </div>
+
+                        <div className={`p-4 sm:w-64 border-t sm:border-t-0 sm:border-l ${idx === 0 ? 'border-indigo-200 bg-indigo-50/40' : 'border-slate-100 bg-slate-50/50'} text-sm overflow-y-auto max-h-52 sm:max-h-none`}>
+                          <div className={`font-semibold mb-3 text-xs uppercase tracking-wider ${idx === 0 ? 'text-indigo-900' : 'text-slate-500'}`}>Member Local Times</div>
+                          <div className="flex flex-col gap-2">
+                            {slot.memberStatuses.map(ms => (
+                              <div key={ms.user.id} className="flex items-center justify-between gap-2">
+                                <div className="flex items-center gap-2 min-w-0">
+                                  {ms.state === 'blocked' ? (
+                                    <div className="w-4 h-4 rounded-full bg-red-100 flex items-center justify-center shrink-0" title="Blocked by another meeting"><X className="w-3 h-3 text-red-600" strokeWidth={3} /></div>
+                                  ) : ms.state === 'unavailable' ? (
+                                    <div className="w-4 h-4 rounded-full bg-slate-200 flex items-center justify-center shrink-0"><div className="w-2 h-0.5 bg-slate-400 rounded-full"></div></div>
+                                  ) : (
+                                    <div className="w-4 h-4 rounded-full bg-emerald-100 flex items-center justify-center shrink-0"><Check className="w-3 h-3 text-emerald-600" strokeWidth={3} /></div>
+                                  )}
+                                  <span className={`truncate text-sm ${ms.state === 'blocked' ? 'text-red-600 line-through' : ms.state === 'unavailable' ? 'text-slate-400' : 'text-slate-700 font-medium'}`}>
+                                    {ms.user.name.split(' ')[0]}
+                                    {ms.state === 'blocked' && <span className="text-[10px] ml-1 no-underline font-semibold">(Blocked)</span>}
+                                  </span>
+                                </div>
+                                <span className={`font-mono text-xs shrink-0 ${ms.isBadHour ? 'text-red-500 font-semibold' : (idx === 0 ? 'text-indigo-700' : 'text-slate-500')}`}>
+                                  {formatTimeForZoneShort(slot.utcTimestamp, ms.memberWeekTz)}
+                                </span>
+                              </div>
+                            ))}
+                          </div>
+                        </div>
+                      </div>
+                    ))}
+                  </div>
+                )}
+              </>
+            )}
+
+            {groupTab === 'heatmap' && (
+              <div className="bg-white rounded-xl border border-slate-200 p-4 shadow-sm">
+                <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2 mb-4 border-b border-slate-100 pb-3">
+                  <div className="text-sm font-semibold text-slate-700">Group Heatmap</div>
+                  <select
+                    value={heatmapUserId || currentUser.id}
+                    onChange={(e) => setHeatmapUserId(e.target.value)}
+                    className="text-xs border border-slate-200 rounded p-1.5 bg-slate-50 text-slate-700"
+                  >
+                    {activeGroup.members
+                      .map(mId => cohort.find(u => u.id === mId))
+                      .filter(Boolean)
+                      .map(u => {
+                        const uWeekTz = getUserTimezoneForWeek(u, currentBaseUtc);
+                        return (
+                          <option key={u.id} value={u.id}>
+                            View in: {u.name}'s Time ({uWeekTz.split('/').pop().replace(/_/g, ' ')})
+                          </option>
+                        );
+                      })}
+                  </select>
+                </div>
+
+                <div className="overflow-x-auto">
+                  <div className="min-w-[600px] flex flex-col gap-0.5">
+                    <div className="flex mb-1">
+                      <div className="w-12"></div>
+                      {GRID_HOURS.map((h) => (
+                        <div key={h} className="flex-1 text-[10px] text-slate-400 text-center font-mono">
+                          {h.toString().padStart(2, '0')}
+                        </div>
+                      ))}
+                    </div>
+                    {generateGrid(
+                      getUserTimezoneForWeek(cohort.find(u => u.id === heatmapUserId) || currentUser, currentBaseUtc),
+                      currentBaseUtc,
+                      60
+                    ).map(day => (
+                      <div key={day.dayName} className="flex gap-0.5 items-center">
+                        <div className="w-12 flex flex-col items-start justify-center">
+                          <span className="text-xs font-medium text-slate-500 leading-none">{day.dayName}</span>
+                          <span className="text-[9px] text-slate-400">{day.dateStr}</span>
+                        </div>
+                        {day.slots.map(slot => {
+                          const count = heatmapData[slot.utcTimestamp] || 0;
+                          const total = Math.max(activeGroup.members.length, 1);
+                          const ratio = count / total;
+                          const intensity = count === 0 ? 'bg-slate-50' :
+                            ratio < 0.4 ? 'bg-emerald-100' :
+                            ratio < 0.7 ? 'bg-emerald-300' :
+                            ratio < 1 ? 'bg-emerald-500' : 'bg-emerald-700';
+                          return (
+                            <div
+                              key={slot.utcTimestamp}
+                              title={`${count} / ${total} members available`}
+                              className={`flex-1 h-6 rounded-sm ${intensity} transition-colors hover:ring-1 hover:ring-black/20`}
+                            ></div>
+                          );
+                        })}
+                      </div>
+                    ))}
+                  </div>
+                </div>
+                <div className="flex justify-end gap-2 mt-4 text-[10px] text-slate-500 font-medium">
+                  <div className="flex items-center gap-1"><div className="w-2 h-2 bg-slate-50 border border-slate-200"></div> 0</div>
+                  <div className="flex items-center gap-1"><div className="w-2 h-2 bg-emerald-100"></div> Low</div>
+                  <div className="flex items-center gap-1"><div className="w-2 h-2 bg-emerald-300"></div> Partial</div>
+                  <div className="flex items-center gap-1"><div className="w-2 h-2 bg-emerald-500"></div> High</div>
+                  <div className="flex items-center gap-1"><div className="w-2 h-2 bg-emerald-700"></div> All</div>
+                </div>
+              </div>
+            )}
+
+            {groupTab === 'members' && (
+              <div className="flex flex-col gap-3">
+                {isGroupAdmin && (
+                  <div className="flex justify-end">
+                    <button
+                      onClick={() => openEditGroup(activeGroup)}
+                      className="inline-flex items-center gap-1.5 px-3 py-1.5 bg-indigo-50 hover:bg-indigo-100 text-indigo-700 rounded-lg text-xs font-semibold transition-colors"
+                    >
+                      <UserPlus className="w-3.5 h-3.5" /> Add / Remove Members
+                    </button>
+                  </div>
+                )}
+                <div className="bg-white rounded-xl border border-slate-200 overflow-hidden shadow-sm">
+                  {activeGroup.members
+                    .map(mId => cohort.find(u => u.id === mId))
+                    .filter(Boolean)
+                    .map((u, i) => {
+                      const uWeekTz = getUserTimezoneForWeek(u, currentBaseUtc);
+                      const isTraveling = Boolean(weekTimezones[u.id]?.[currentBaseUtc] && weekTimezones[u.id][currentBaseUtc] !== u.timezone);
+                      return (
+                        <div key={u.id} className={`p-4 flex items-center justify-between gap-2 ${i !== 0 ? 'border-t border-slate-100' : ''}`}>
+                          <div className="flex items-center gap-3 min-w-0">
+                            <div className="w-10 h-10 rounded-full bg-blue-100 text-blue-700 flex items-center justify-center font-bold shrink-0">
+                              {u.name.charAt(0).toUpperCase()}
+                            </div>
+                            <div className="min-w-0">
+                              <div className="font-bold text-slate-800 truncate flex items-center gap-1.5">
+                                <span>{u.name}</span>
+                                {activeGroup.adminId === u.id && (
+                                  <span className="text-[10px] bg-indigo-50 text-indigo-700 px-1.5 py-0.5 rounded font-semibold">Organizer</span>
+                                )}
+                                {isTraveling && (
+                                  <span className="text-[10px] bg-blue-50 text-blue-700 px-1.5 py-0.5 rounded font-semibold">Traveling</span>
+                                )}
+                              </div>
+                              <div className="text-xs text-slate-500 truncate">{u.email}</div>
+                            </div>
+                          </div>
+                          <div className="text-right shrink-0">
+                            <div className="text-xs sm:text-sm font-medium text-slate-700">{uWeekTz.replace(/_/g, ' ')}</div>
+                            <div className="text-xs text-slate-400">
+                              {getZoneAbbreviation(currentBaseUtc, uWeekTz)} ({formatOffsetLabel(getUtcOffsetMinutes(currentBaseUtc, uWeekTz))})
+                            </div>
+                          </div>
+                        </div>
+                      );
+                    })}
+                </div>
+              </div>
+            )}
+          </div>
+        </div>
+      )}
+
+      {/* TAB 3: PRIVACY (GDPR) */}
+      {activeTab === 'privacy' && (
+        <div className="flex-1 overflow-auto bg-slate-50 p-4 sm:p-6">
+          <div className="max-w-xl mx-auto flex flex-col gap-5">
+            <div>
+              <h2 className="text-xl font-bold text-slate-900 flex items-center gap-2">
+                <ShieldCheck className="w-6 h-6 text-indigo-600" /> Privacy & Account (GDPR)
+              </h2>
+              <p className="text-xs text-slate-500 mt-1">
+                Manage your home timezone, review how your GEMBA cohort data is handled, or exercise your GDPR rights.
+              </p>
+            </div>
+
+            {privacyNotice && (
+              <div className="bg-emerald-50 border border-emerald-200 text-emerald-800 text-xs p-3 rounded-lg flex items-center justify-between">
+                <span className="flex items-center gap-2"><Check className="w-4 h-4 shrink-0" /> {privacyNotice}</span>
+                <button onClick={() => setPrivacyNotice('')} className="text-emerald-600 hover:text-emerald-900"><X className="w-4 h-4" /></button>
+              </div>
+            )}
+
+            <div className="bg-white rounded-xl border border-slate-200 p-4 shadow-sm flex flex-col gap-3">
+              <div className="flex items-center gap-3 pb-3 border-b border-slate-100">
+                <div className="w-10 h-10 rounded-full bg-indigo-100 text-indigo-700 flex items-center justify-center font-bold">
+                  {currentUser.name.charAt(0).toUpperCase()}
+                </div>
+                <div>
+                  <div className="font-bold text-slate-800">{currentUser.name}</div>
+                  <div className="text-xs text-slate-500">{currentUser.email}</div>
+                </div>
+              </div>
+              <div>
+                <label className="block text-xs font-semibold text-slate-700 mb-1.5">
+                  Home Timezone (Standard IANA • DST Automatic)
+                </label>
+                <TimezonePicker
+                  value={currentUser.timezone}
+                  onChange={async (newTz) => {
+                    try {
+                      await sbFetch(`gemba_users?id=eq.${encodeURIComponent(currentUser.id)}`, {
+                        method: 'PATCH',
+                        body: JSON.stringify({ timezone: newTz }),
+                      });
+                      setCohort(prev => prev.map(u => u.id === currentUser.id ? { ...u, timezone: newTz } : u));
+                      setPrivacyNotice(`Home timezone updated to ${newTz.replace(/_/g, ' ')}.`);
+                    } catch {
+                      setPrivacyNotice('Could not update timezone in EU Cloud.');
+                    }
+                  }}
+                  refUtcMs={currentBaseUtc}
+                />
+              </div>
+            </div>
+
+            <div className="bg-white rounded-xl border border-slate-200 p-4 shadow-sm flex flex-col gap-2.5 text-xs text-slate-600">
+              <div className="font-bold text-slate-800 text-sm flex items-center gap-2">
+                <UserCheck className="w-4 h-4 text-emerald-600" /> Data Minimization & EU Hosting
+              </div>
+              <ul className="list-disc pl-5 space-y-1.5">
+                <li><strong>EU Paris Hosting:</strong> All cohort records are stored in West EU (Paris) servers.</li>
+                <li><strong>Minimal Data Stored:</strong> Only your name, <code>@skema.edu</code> email, broad IANA timezone (no GPS or address), and weekly free/busy slots.</li>
+                <li><strong>Self-Registration Only:</strong> Bulk uploading classmates' emails is disabled to ensure explicit opt-in consent.</li>
+                <li><strong>Independent Student Tool:</strong> Operated voluntarily by GEMBA cohort members, not an official SKEMA IT system.</li>
+              </ul>
+            </div>
+
+            <div className="bg-white rounded-xl border border-slate-200 p-4 shadow-sm flex flex-col gap-3">
+              <div className="font-bold text-slate-800 text-sm">Your GDPR Rights</div>
+
+              <button
+                onClick={handleExportMyData}
+                className="w-full py-2.5 px-4 bg-slate-100 hover:bg-slate-200 text-slate-800 font-semibold rounded-lg text-xs flex items-center justify-center gap-2 transition-colors"
+              >
+                <Download className="w-4 h-4" /> Export My Data (JSON)
+              </button>
+
+              {!confirmingDelete ? (
+                <button
+                  onClick={() => setConfirmingDelete(true)}
+                  className="w-full py-2.5 px-4 bg-red-50 hover:bg-red-100 text-red-700 border border-red-200 font-semibold rounded-lg text-xs flex items-center justify-center gap-2 transition-colors"
+                >
+                  <Trash2 className="w-4 h-4" /> Delete My Account & All Data
+                </button>
+              ) : (
+                <div className="bg-red-50 border border-red-300 rounded-lg p-3 flex flex-col gap-2.5">
+                  <p className="text-xs text-red-800 font-medium">
+                    Are you sure? This permanently erases your profile, availability, and removes you from all GEMBA study groups.
+                  </p>
+                  <div className="flex gap-2">
+                    <button
+                      onClick={() => setConfirmingDelete(false)}
+                      className="flex-1 py-2 bg-white border border-slate-300 text-slate-700 rounded-lg text-xs font-semibold hover:bg-slate-50"
+                    >
+                      Cancel
+                    </button>
+                    <button
+                      onClick={handleDeleteMyAccount}
+                      className="flex-1 py-2 bg-red-600 hover:bg-red-700 text-white rounded-lg text-xs font-semibold"
+                    >
+                      Yes, Permanently Delete
+                    </button>
+                  </div>
+                </div>
+              )}
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Bottom Tab Navigation */}
+      <nav className="bg-white border-t border-slate-200 flex shrink-0 pb-safe z-20">
+        <button
+          onClick={() => { setActiveTab('avail'); setIsCreatingGroup(false); setIsEditingGroup(false); }}
+          className={`flex-1 p-3.5 flex flex-col items-center justify-center gap-1 transition-colors ${activeTab === 'avail' ? 'text-blue-600' : 'text-slate-400 hover:text-slate-600 hover:bg-slate-50'}`}
+        >
+          <Calendar className="w-5 h-5" />
+          <span className="text-[10px] font-bold uppercase tracking-wider">My Avail</span>
+        </button>
+        <button
+          onClick={() => { setActiveTab('groups'); }}
+          className={`flex-1 p-3.5 flex flex-col items-center justify-center gap-1 transition-colors ${activeTab === 'groups' ? 'text-blue-600' : 'text-slate-400 hover:text-slate-600 hover:bg-slate-50'}`}
+        >
+          <Users className="w-5 h-5" />
+          <span className="text-[10px] font-bold uppercase tracking-wider">Groups</span>
+        </button>
+        <button
+          onClick={() => { setActiveTab('privacy'); setIsCreatingGroup(false); setIsEditingGroup(false); }}
+          className={`flex-1 p-3.5 flex flex-col items-center justify-center gap-1 transition-colors ${activeTab === 'privacy' ? 'text-blue-600' : 'text-slate-400 hover:text-slate-600 hover:bg-slate-50'}`}
+        >
+          <ShieldCheck className="w-5 h-5" />
+          <span className="text-[10px] font-bold uppercase tracking-wider">Privacy</span>
+        </button>
+      </nav>
+    </div>
+  );
+}
