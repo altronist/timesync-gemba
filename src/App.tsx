@@ -1965,3 +1965,222 @@ export default function App() {
                           <span className="text-xs font-medium text-slate-500 leading-none">{day.dayName}</span>
                           <span className="text-[9px] text-slate-400">{day.dateStr}</span>
                         </div>
+                        {day.slots.map(slot => {
+                          const count = heatmapData[slot.utcTimestamp] || 0;
+                          const total = Math.max(activeGroup.members.length, 1);
+                          const ratio = count / total;
+                          const intensity = count === 0 ? 'bg-slate-50' :
+                            ratio < 0.4 ? 'bg-emerald-100' :
+                            ratio < 0.7 ? 'bg-emerald-300' :
+                            ratio < 1 ? 'bg-emerald-500' : 'bg-emerald-700';
+                          return (
+                            <div
+                              key={slot.utcTimestamp}
+                              title={`${count} / ${total} members available`}
+                              className={`flex-1 h-6 rounded-sm ${intensity} transition-colors hover:ring-1 hover:ring-black/20`}
+                            ></div>
+                          );
+                        })}
+                      </div>
+                    ))}
+                  </div>
+                </div>
+                <div className="flex justify-end gap-2 mt-4 text-[10px] text-slate-500 font-medium">
+                  <div className="flex items-center gap-1"><div className="w-2 h-2 bg-slate-50 border border-slate-200"></div> 0</div>
+                  <div className="flex items-center gap-1"><div className="w-2 h-2 bg-emerald-100"></div> Low</div>
+                  <div className="flex items-center gap-1"><div className="w-2 h-2 bg-emerald-300"></div> Partial</div>
+                  <div className="flex items-center gap-1"><div className="w-2 h-2 bg-emerald-500"></div> High</div>
+                  <div className="flex items-center gap-1"><div className="w-2 h-2 bg-emerald-700"></div> All</div>
+                </div>
+              </div>
+            )}
+
+            {groupTab === 'members' && (
+              <div className="flex flex-col gap-3">
+                {isGroupAdmin && (
+                  <div className="flex justify-end">
+                    <button
+                      onClick={() => openEditGroup(activeGroup)}
+                      className="inline-flex items-center gap-1.5 px-3 py-1.5 bg-indigo-50 hover:bg-indigo-100 text-indigo-700 rounded-lg text-xs font-semibold transition-colors"
+                    >
+                      <UserPlus className="w-3.5 h-3.5" /> Add / Remove Members
+                    </button>
+                  </div>
+                )}
+                <div className="bg-white rounded-xl border border-slate-200 overflow-hidden shadow-sm">
+                  {activeGroup.members
+                    .map(mId => cohort.find(u => u.id === mId))
+                    .filter(Boolean)
+                    .map((u, i) => {
+                      const uWeekTz = getUserTimezoneForWeek(u, currentBaseUtc);
+                      const isTraveling = Boolean(weekTimezones[u.id]?.[currentBaseUtc] && weekTimezones[u.id][currentBaseUtc] !== u.timezone);
+                      return (
+                        <div key={u.id} className={`p-4 flex items-center justify-between gap-2 ${i !== 0 ? 'border-t border-slate-100' : ''}`}>
+                          <div className="flex items-center gap-3 min-w-0">
+                            <div className="w-10 h-10 rounded-full bg-blue-100 text-blue-700 flex items-center justify-center font-bold shrink-0">
+                              {u.name.charAt(0).toUpperCase()}
+                            </div>
+                            <div className="min-w-0">
+                              <div className="font-bold text-slate-800 truncate flex items-center gap-1.5">
+                                <span>{u.name}</span>
+                                {activeGroup.adminId === u.id && (
+                                  <span className="text-[10px] bg-indigo-50 text-indigo-700 px-1.5 py-0.5 rounded font-semibold">Organizer</span>
+                                )}
+                                {isTraveling && (
+                                  <span className="text-[10px] bg-blue-50 text-blue-700 px-1.5 py-0.5 rounded font-semibold">Traveling</span>
+                                )}
+                              </div>
+                              <div className="text-xs text-slate-500 truncate">{u.email}</div>
+                            </div>
+                          </div>
+                          <div className="text-right shrink-0">
+                            <div className="text-xs sm:text-sm font-medium text-slate-700">{uWeekTz.replace(/_/g, ' ')}</div>
+                            <div className="text-xs text-slate-400">
+                              {getZoneAbbreviation(currentBaseUtc, uWeekTz)} ({formatOffsetLabel(getUtcOffsetMinutes(currentBaseUtc, uWeekTz))})
+                            </div>
+                          </div>
+                        </div>
+                      );
+                    })}
+                </div>
+              </div>
+            )}
+          </div>
+        </div>
+      )}
+
+      {/* TAB 3: PRIVACY (GDPR) */}
+      {activeTab === 'privacy' && (
+        <div className="flex-1 overflow-auto bg-slate-50 p-4 sm:p-6">
+          <div className="max-w-xl mx-auto flex flex-col gap-5">
+            <div>
+              <h2 className="text-xl font-bold text-slate-900 flex items-center gap-2">
+                <ShieldCheck className="w-6 h-6 text-indigo-600" /> Privacy & Account (GDPR)
+              </h2>
+              <p className="text-xs text-slate-500 mt-1">
+                Manage your home timezone, review how your GEMBA cohort data is handled, or exercise your GDPR rights.
+              </p>
+            </div>
+
+            {privacyNotice && (
+              <div className="bg-emerald-50 border border-emerald-200 text-emerald-800 text-xs p-3 rounded-lg flex items-center justify-between">
+                <span className="flex items-center gap-2"><Check className="w-4 h-4 shrink-0" /> {privacyNotice}</span>
+                <button onClick={() => setPrivacyNotice('')} className="text-emerald-600 hover:text-emerald-900"><X className="w-4 h-4" /></button>
+              </div>
+            )}
+
+            <div className="bg-white rounded-xl border border-slate-200 p-4 shadow-sm flex flex-col gap-3">
+              <div className="flex items-center gap-3 pb-3 border-b border-slate-100">
+                <div className="w-10 h-10 rounded-full bg-indigo-100 text-indigo-700 flex items-center justify-center font-bold">
+                  {currentUser.name.charAt(0).toUpperCase()}
+                </div>
+                <div>
+                  <div className="font-bold text-slate-800">{currentUser.name}</div>
+                  <div className="text-xs text-slate-500">{currentUser.email}</div>
+                </div>
+              </div>
+              <div>
+                <label className="block text-xs font-semibold text-slate-700 mb-1.5">
+                  Home Timezone (Standard IANA • DST Automatic)
+                </label>
+                <TimezonePicker
+                  value={currentUser.timezone}
+                  onChange={async (newTz) => {
+                    try {
+                      await sbFetch(`gemba_users?id=eq.${encodeURIComponent(currentUser.id)}`, {
+                        method: 'PATCH',
+                        body: JSON.stringify({ timezone: newTz }),
+                      });
+                      setCohort(prev => prev.map(u => u.id === currentUser.id ? { ...u, timezone: newTz } : u));
+                      setPrivacyNotice(`Home timezone updated to ${newTz.replace(/_/g, ' ')}.`);
+                    } catch {
+                      setPrivacyNotice('Could not update timezone in EU Cloud.');
+                    }
+                  }}
+                  refUtcMs={currentBaseUtc}
+                />
+              </div>
+            </div>
+
+            <div className="bg-white rounded-xl border border-slate-200 p-4 shadow-sm flex flex-col gap-2.5 text-xs text-slate-600">
+              <div className="font-bold text-slate-800 text-sm flex items-center gap-2">
+                <UserCheck className="w-4 h-4 text-emerald-600" /> Data Minimization & EU Hosting
+              </div>
+              <ul className="list-disc pl-5 space-y-1.5">
+                <li><strong>EU Paris Hosting:</strong> All cohort records are stored in West EU (Paris) servers.</li>
+                <li><strong>Minimal Data Stored:</strong> Only your name, <code>@skema.edu</code> email, broad IANA timezone (no GPS or address), and weekly free/busy slots.</li>
+                <li><strong>Self-Registration Only:</strong> Bulk uploading classmates' emails is disabled to ensure explicit opt-in consent.</li>
+                <li><strong>Independent Student Tool:</strong> Operated voluntarily by GEMBA cohort members, not an official SKEMA IT system.</li>
+              </ul>
+            </div>
+
+            <div className="bg-white rounded-xl border border-slate-200 p-4 shadow-sm flex flex-col gap-3">
+              <div className="font-bold text-slate-800 text-sm">Your GDPR Rights</div>
+
+              <button
+                onClick={handleExportMyData}
+                className="w-full py-2.5 px-4 bg-slate-100 hover:bg-slate-200 text-slate-800 font-semibold rounded-lg text-xs flex items-center justify-center gap-2 transition-colors"
+              >
+                <Download className="w-4 h-4" /> Export My Data (JSON)
+              </button>
+
+              {!confirmingDelete ? (
+                <button
+                  onClick={() => setConfirmingDelete(true)}
+                  className="w-full py-2.5 px-4 bg-red-50 hover:bg-red-100 text-red-700 border border-red-200 font-semibold rounded-lg text-xs flex items-center justify-center gap-2 transition-colors"
+                >
+                  <Trash2 className="w-4 h-4" /> Delete My Account & All Data
+                </button>
+              ) : (
+                <div className="bg-red-50 border border-red-300 rounded-lg p-3 flex flex-col gap-2.5">
+                  <p className="text-xs text-red-800 font-medium">
+                    Are you sure? This permanently erases your profile, availability, and removes you from all GEMBA study groups.
+                  </p>
+                  <div className="flex gap-2">
+                    <button
+                      onClick={() => setConfirmingDelete(false)}
+                      className="flex-1 py-2 bg-white border border-slate-300 text-slate-700 rounded-lg text-xs font-semibold hover:bg-slate-50"
+                    >
+                      Cancel
+                    </button>
+                    <button
+                      onClick={handleDeleteMyAccount}
+                      className="flex-1 py-2 bg-red-600 hover:bg-red-700 text-white rounded-lg text-xs font-semibold"
+                    >
+                      Yes, Permanently Delete
+                    </button>
+                  </div>
+                </div>
+              )}
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Bottom Tab Navigation */}
+      <nav className="bg-white border-t border-slate-200 flex shrink-0 pb-safe z-20">
+        <button
+          onClick={() => { setActiveTab('avail'); setIsCreatingGroup(false); setIsEditingGroup(false); }}
+          className={`flex-1 p-3.5 flex flex-col items-center justify-center gap-1 transition-colors ${activeTab === 'avail' ? 'text-blue-600' : 'text-slate-400 hover:text-slate-600 hover:bg-slate-50'}`}
+        >
+          <Calendar className="w-5 h-5" />
+          <span className="text-[10px] font-bold uppercase tracking-wider">My Avail</span>
+        </button>
+        <button
+          onClick={() => { setActiveTab('groups'); }}
+          className={`flex-1 p-3.5 flex flex-col items-center justify-center gap-1 transition-colors ${activeTab === 'groups' ? 'text-blue-600' : 'text-slate-400 hover:text-slate-600 hover:bg-slate-50'}`}
+        >
+          <Users className="w-5 h-5" />
+          <span className="text-[10px] font-bold uppercase tracking-wider">Groups</span>
+        </button>
+        <button
+          onClick={() => { setActiveTab('privacy'); setIsCreatingGroup(false); setIsEditingGroup(false); }}
+          className={`flex-1 p-3.5 flex flex-col items-center justify-center gap-1 transition-colors ${activeTab === 'privacy' ? 'text-blue-600' : 'text-slate-400 hover:text-slate-600 hover:bg-slate-50'}`}
+        >
+          <ShieldCheck className="w-5 h-5" />
+          <span className="text-[10px] font-bold uppercase tracking-wider">Privacy</span>
+        </button>
+      </nav>
+    </div>
+  );
+}
