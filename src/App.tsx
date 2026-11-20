@@ -250,9 +250,8 @@ const downloadMeetingIcs = (groupName, utcTimestamp, memberEmails = []) => {
   const startStr = formatIcsUtc(utcTimestamp);
   const endStr = formatIcsUtc(utcTimestamp + 3600 * 1000);
   const nowStr = formatIcsUtc(Date.now());
-  const safeName = groupName.replace(/[,;\]/g, ' ');
-  const attendeesLines = memberEmails.map(em => `ATTENDEE;RSVP=TRUE:mailto:${em}`).join('
-');
+  const safeName = groupName.replace(/[,;\\]/g, ' ');
+  const attendeesLines = memberEmails.map(em => `ATTENDEE;RSVP=TRUE:mailto:${em}`).join('\r\n');
 
   const icsContent = [
     'BEGIN:VCALENDAR',
@@ -270,8 +269,7 @@ const downloadMeetingIcs = (groupName, utcTimestamp, memberEmails = []) => {
     attendeesLines,
     'END:VEVENT',
     'END:VCALENDAR'
-  ].filter(Boolean).join('
-');
+  ].filter(Boolean).join('\r\n');
 
   const blob = new Blob([icsContent], { type: 'text/calendar;charset=utf-8' });
   const url = URL.createObjectURL(blob);
@@ -332,12 +330,8 @@ const parseIcsDateToUtcMs = (rawValue, paramStr = '', fallbackTz = DETECTED_TIME
 };
 
 const parseIcsFile = (icsText, fallbackTz) => {
-  const unfolded = icsText.replace(/
-[ 	]/g, '').replace(/
-[ 	]/g, '');
-  const lines = unfolded.split(/
-?
-/);
+  const unfolded = icsText.replace(/\r\n[ \t]/g, '').replace(/\n[ \t]/g, '');
+  const lines = unfolded.split(/\r?\n/);
   const events = [];
   let inEvent = false;
   let current = {};
@@ -395,7 +389,7 @@ const parseIcsFile = (icsText, fallbackTz) => {
     } else if (propName === 'DTEND') {
       current.end = parseIcsDateToUtcMs(value, params, fallbackTz);
     } else if (propName === 'SUMMARY') {
-      current.summary = value.replace(/\,/g, ',').replace(/\;/g, ';').replace(/\n/g, ' ').trim();
+      current.summary = value.replace(/\\,/g, ',').replace(/\\;/g, ';').replace(/\\n/g, ' ').trim();
     } else if (propName === 'RRULE') {
       current.rrule = value;
     } else if (propName === 'TRANSP') {
@@ -2362,9 +2356,7 @@ export default function App() {
                           const busyNames = slotStatuses
                             .filter(ms => ms.state !== 'available' && ms.state !== 'preferred')
                             .map(ms => ms.user.name.split(' ')[0]);
-                          const richTooltip = `${day.dayName} ${slot.label} (${count}/${total} free)
-✓ Free: ${freeNames.length ? freeNames.join(', ') : 'None'}
-✕ Unavailable: ${busyNames.length ? busyNames.join(', ') : 'None'}`;
+                          const richTooltip = `${day.dayName} ${slot.label} (${count}/${total} free)\n✓ Free: ${freeNames.length ? freeNames.join(', ') : 'None'}\n✕ Unavailable: ${busyNames.length ? busyNames.join(', ') : 'None'}`;
 
                           return (
                             <div
