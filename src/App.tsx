@@ -495,11 +495,18 @@ export default function App() {
   const [weekTimezones, setWeekTimezones] = useState({}); // { [userId]: { [weekMondayUtc]: 'Europe/Paris' } }
   const [confirmedMeetings, setConfirmedMeetings] = useState({});
   const [isSyncing, setIsSyncing] = useState(false);
+  const [isSavingAvail, setIsSavingAvail] = useState(false);
   const [syncError, setSyncError] = useState('');
   const [toastMessage, setToastMessage] = useState('');
 
-  // Safeguard against background 20s poll overwriting in-flight local edits
-  const lastLocalEditRef = useRef(0);
+  // --- VPN-Resilient Batch Queue & In-Flight Slot Protection ---
+  // Tracks pending slot mutations: { [utcTs]: { state: 'available'|'preferred'|null, tz: string } }
+  const pendingMutationsRef = useRef({});
+  // Tracks slots currently being sent over the network so Refresh never clobbers in-flight clicks
+  const inFlightMutationsRef = useRef({});
+  const flushTimerRef = useRef(null);
+  const isFlushingRef = useRef(false);
+  const currentUserIdRef = useRef(null);
 
   // Personal Local ICS Calendar Overlay (Never sent to Cloud)
   const [icsEvents, setIcsEvents] = useState([]);
@@ -553,6 +560,10 @@ export default function App() {
   const [toggles, setToggles] = useState({ typical: false, weekend: false, custom: false });
   const [customPreset, setCustomPreset] = useState([]);
 
+  useEffect(() => {
+    currentUserIdRef.current = currentUserId;
+  }, [currentUserId]);
+
   const currentUser = cohort.find(u => u.id === currentUserId) || null;
   const activeGroup = groups.find(g => g.id === activeGroupId) || null;
 
@@ -570,6 +581,94 @@ export default function App() {
     setToastMessage(msg);
     setTimeout(() => setToastMessage(''), 3000);
   };
+
+  // --- Debounced Batch Flush to Supabase (Prevents Out-of-Order VPN Races) ---
+  const flushPendingMutations = useCallback(async () => {
+    const uid = currentUserIdRef.current;
+    if (!uid || isFlushingRef.current) return;
+
+    const entries = Object.entries(pendingMutationsRef.current);
+    if (entries.length === 0) return;
+
+    isFlushingRef.current = true;
+    setIsSavingAvail(true);
+
+    // Move queued items into inFlight so newer clicks during the network call queue cleanly
+    const batch = { ...pendingMutationsRef.current };
+    pendingMutationsRef.current = {};
+    inFlightMutationsRef.current = { ...inFlightMutationsRef.current, ...batch };
+
+    const upserts = [];
+    const deletes = [];
+    for (const [tsStr, item] of Object.entries(batch)) {
+      const utcTs = Number(tsStr);
+      if (item.state) {
+        upserts.push({
+          user_id: uid,
+          utc_ts: utcTs,
+          state: item.state,
+          week_timezone: item.tz,
+        });
+      } else {
+        deletes.push(utcTs);
+      }
+    }
+
+    try {
+      if (upserts.length > 0) {
+        await sbFetch('gemba_availabilities', {
+          method: 'POST',
+          body: JSON.stringify(upserts),
+        });
+      }
+      if (deletes.length > 0) {
+        // Chunk deletes into safe URL lengths
+        for (let i = 0; i < deletes.length; i += 80) {
+          const chunk = deletes.slice(i, i + 80).join(',');
+          await sbFetch(`gemba_availabilities?user_id=eq.${encodeURIComponent(uid)}&utc_ts=in.(${chunk})`, {
+            method: 'DELETE',
+          });
+        }
+      }
+      setSyncError('');
+    } catch {
+      // Re-queue any failed mutations that weren't superseded by newer clicks
+      for (const [tsStr, item] of Object.entries(batch)) {
+        if (!(tsStr in pendingMutationsRef.current)) {
+          pendingMutationsRef.current[tsStr] = item;
+        }
+      }
+      setSyncError('Slow connection to EU Cloud — retrying save automatically...');
+    } finally {
+      for (const tsStr of Object.keys(batch)) {
+        delete inFlightMutationsRef.current[tsStr];
+      }
+      isFlushingRef.current = false;
+
+      // If more clicks arrived while this batch was flying over the VPN, flush immediately
+      if (Object.keys(pendingMutationsRef.current).length > 0) {
+        flushTimerRef.current = setTimeout(() => {
+          flushPendingMutations();
+        }, 350);
+      } else {
+        setIsSavingAvail(false);
+      }
+    }
+  }, []);
+
+  const queueAvailabilityMutations = useCallback((upserts, deletes, tz) => {
+    for (const { utcTs, state } of upserts) {
+      pendingMutationsRef.current[String(utcTs)] = { state, tz };
+    }
+    for (const utcTs of deletes) {
+      pendingMutationsRef.current[String(utcTs)] = { state: null, tz };
+    }
+    setIsSavingAvail(true);
+    if (flushTimerRef.current) clearTimeout(flushTimerRef.current);
+    flushTimerRef.current = setTimeout(() => {
+      flushPendingMutations();
+    }, 350);
+  }, [flushPendingMutations]);
 
   // Load saved local ICS overlay when user signs in
   useEffect(() => {
@@ -642,14 +741,11 @@ export default function App() {
   };
 
   // --- Cloud Sync Loader (Supabase REST) ---
-  const syncFromCloud = useCallback(async (showFeedback = false) => {
-    if (!showFeedback && Date.now() - lastLocalEditRef.current < 6000) {
-      return;
-    }
-
-    const syncStartedAt = Date.now();
+  // Background polls NEVER overwrite the signed-in user's local grid; manual Refresh merges safely on top of any pending/in-flight clicks.
+  const syncFromCloud = useCallback(async (forceFullRefresh = false) => {
     setIsSyncing(true);
-    setSyncError('');
+    if (forceFullRefresh) setSyncError('');
+
     try {
       const [usersRows, groupsRows, availRows, meetingRows] = await Promise.all([
         sbFetch('gemba_users?select=*'),
@@ -657,10 +753,6 @@ export default function App() {
         sbFetch('gemba_availabilities?select=*'),
         sbFetch('gemba_meetings?select=*'),
       ]);
-
-      if (!showFeedback && lastLocalEditRef.current > syncStartedAt) {
-        return;
-      }
 
       const mappedUsers = (usersRows || []).map(r => ({
         id: r.id,
@@ -676,7 +768,7 @@ export default function App() {
         adminId: r.admin_id,
         members: Array.isArray(r.members) ? r.members : [],
       }));
-      const mappedAvail = {};
+      const cloudAvail = {};
       const mappedWeekTz = {};
       (availRows || []).forEach(r => {
         const ts = Number(r.utc_ts);
@@ -686,8 +778,8 @@ export default function App() {
             mappedWeekTz[r.user_id][Math.abs(ts)] = r.week_timezone;
           }
         } else {
-          if (!mappedAvail[r.user_id]) mappedAvail[r.user_id] = {};
-          mappedAvail[r.user_id][ts] = r.state;
+          if (!cloudAvail[r.user_id]) cloudAvail[r.user_id] = {};
+          cloudAvail[r.user_id][ts] = r.state;
         }
       });
       const mappedMeetings = {};
@@ -698,20 +790,51 @@ export default function App() {
         };
       });
 
+      const activeUid = currentUserIdRef.current;
+
+      setAvailabilities(prev => {
+        // Not signed in yet: accept full cloud snapshot
+        if (!activeUid) return cloudAvail;
+
+        // Background 20s poll: update teammates only, preserve signed-in user's local grid 100%
+        if (!forceFullRefresh && prev[activeUid]) {
+          return {
+            ...cloudAvail,
+            [activeUid]: prev[activeUid],
+          };
+        }
+
+        // Manual Refresh (or initial hydration): start from cloud and re-apply any in-flight/pending local clicks
+        const mergedOwn = { ...(cloudAvail[activeUid] || {}) };
+        const unconfirmed = {
+          ...inFlightMutationsRef.current,
+          ...pendingMutationsRef.current,
+        };
+        for (const [tsStr, item] of Object.entries(unconfirmed)) {
+          if (item.state) mergedOwn[tsStr] = item.state;
+          else delete mergedOwn[tsStr];
+        }
+        return {
+          ...cloudAvail,
+          [activeUid]: mergedOwn,
+        };
+      });
+
       setCohort(mappedUsers);
       setGroups(mappedGroups);
-      setAvailabilities(mappedAvail);
       setWeekTimezones(mappedWeekTz);
       setConfirmedMeetings(mappedMeetings);
 
       if (mappedUsers.length === 0 && !isAuthenticated) {
         setAuthMode('signup');
       }
-      if (showFeedback) {
+      if (forceFullRefresh) {
         showToast('Synced latest updates from EU Cloud.');
       }
     } catch {
-      setSyncError('Could not reach EU Cloud database. Tap Refresh to retry.');
+      if (forceFullRefresh) {
+        setSyncError('Could not reach EU Cloud database. Tap Refresh to retry.');
+      }
     } finally {
       setIsSyncing(false);
     }
@@ -739,7 +862,6 @@ export default function App() {
   // --- Save / Clear Per-Week Timezone Override ---
   const setWeekTimezoneOverride = async (newTz) => {
     if (!currentUser) return;
-    lastLocalEditRef.current = Date.now();
     const sentinelTs = -currentBaseUtc;
 
     setWeekTimezones(prev => {
@@ -826,6 +948,8 @@ export default function App() {
           setAuthError('Incorrect password. Try again or use "Forgot / Reset Password".');
           return;
         }
+        pendingMutationsRef.current = {};
+        inFlightMutationsRef.current = {};
         setCurrentUserId(existing.id);
         setIsAuthenticated(true);
         setAuthPassword('');
@@ -867,6 +991,8 @@ export default function App() {
           }),
         });
 
+        pendingMutationsRef.current = {};
+        inFlightMutationsRef.current = {};
         setCohort(prev => [...prev, newUser]);
         setAvailabilities(prev => ({ ...prev, [newUser.id]: {} }));
         setCurrentUserId(newUser.id);
@@ -898,36 +1024,6 @@ export default function App() {
       setAuthError('Could not save to EU Cloud database. Please try again.');
     } finally {
       setAuthLoading(false);
-    }
-  };
-
-  // --- Cloud Write Helper for Availability ---
-  const persistAvailabilityChanges = async (userId, upserts, deletes) => {
-    lastLocalEditRef.current = Date.now();
-    try {
-      if (upserts.length > 0) {
-        await sbFetch('gemba_availabilities', {
-          method: 'POST',
-          body: JSON.stringify(
-            upserts.map(({ utcTs, state }) => ({
-              user_id: userId,
-              utc_ts: utcTs,
-              state,
-              week_timezone: activeTimezone,
-            }))
-          ),
-        });
-      }
-      if (deletes.length > 0) {
-        const list = deletes.join(',');
-        await sbFetch(`gemba_availabilities?user_id=eq.${encodeURIComponent(userId)}&utc_ts=in.(${list})`, {
-          method: 'DELETE',
-        });
-      }
-    } catch {
-      setSyncError('Failed to save availability to EU Cloud. Tap Refresh to retry.');
-    } finally {
-      lastLocalEditRef.current = Date.now();
     }
   };
 
@@ -983,6 +1079,8 @@ export default function App() {
       return;
     }
 
+    pendingMutationsRef.current = {};
+    inFlightMutationsRef.current = {};
     setAvailabilities(prev => {
       const next = { ...prev };
       delete next[idToDelete];
@@ -1053,7 +1151,6 @@ export default function App() {
   const cycleState = (utcTimestamp) => {
     if (!currentUser) return;
     if (getUserConfirmedMeeting(currentUser.id, utcTimestamp)) return;
-    lastLocalEditRef.current = Date.now();
     const current = availabilities[currentUser.id]?.[utcTimestamp] || 'unavailable';
     const isBusyInIcs = Boolean(getBusyIcsEvent(utcTimestamp, slotDuration));
 
@@ -1073,15 +1170,14 @@ export default function App() {
     });
 
     if (nextState) {
-      persistAvailabilityChanges(currentUser.id, [{ utcTs: utcTimestamp, state: nextState }], []);
+      queueAvailabilityMutations([{ utcTs: utcTimestamp, state: nextState }], [], activeTimezone);
     } else {
-      persistAvailabilityChanges(currentUser.id, [], [utcTimestamp]);
+      queueAvailabilityMutations([], [utcTimestamp], activeTimezone);
     }
   };
 
   const applyLocalPattern = (conditionFn, isAdding) => {
     if (!currentUser) return;
-    lastLocalEditRef.current = Date.now();
     const grid = generateGrid(activeTimezone, currentBaseUtc, slotDuration);
     const upserts = [];
     const deletes = [];
@@ -1104,12 +1200,11 @@ export default function App() {
       return { ...prev, [currentUser.id]: userAvail };
     });
 
-    persistAvailabilityChanges(currentUser.id, upserts, deletes);
+    queueAvailabilityMutations(upserts, deletes, activeTimezone);
   };
 
   const clearWeek = () => {
     if (!currentUser) return;
-    lastLocalEditRef.current = Date.now();
     const grid = generateGrid(activeTimezone, currentBaseUtc, 30);
     const deletes = [];
     setAvailabilities(prev => {
@@ -1125,7 +1220,7 @@ export default function App() {
       return { ...prev, [currentUser.id]: userAvail };
     });
     setToggles({ typical: false, weekend: false, custom: false });
-    persistAvailabilityChanges(currentUser.id, [], deletes);
+    queueAvailabilityMutations([], deletes, activeTimezone);
   };
 
   const isFriSatWeekend = FRI_SAT_WEEKEND_ZONES.has(activeTimezone);
@@ -1150,7 +1245,6 @@ export default function App() {
 
   const toggleCustom = () => {
     if (!currentUser || customPreset.length === 0) return;
-    lastLocalEditRef.current = Date.now();
     const isAdding = !toggles.custom;
     const grid = generateGrid(activeTimezone, currentBaseUtc, slotDuration);
     const upserts = [];
@@ -1173,7 +1267,7 @@ export default function App() {
       return { ...prev, [currentUser.id]: userAvail };
     });
     setToggles(prev => ({ ...prev, custom: isAdding }));
-    persistAvailabilityChanges(currentUser.id, upserts, deletes);
+    queueAvailabilityMutations(upserts, deletes, activeTimezone);
   };
 
   const saveCustomPreset = () => {
@@ -1196,7 +1290,6 @@ export default function App() {
   // --- Group CRUD Handlers ---
   const handleCreateGroup = async () => {
     if (!currentUser || !newGroupName.trim() || newGroupMembers.length === 0) return;
-    lastLocalEditRef.current = Date.now();
     const newGroup = {
       id: 'g_' + Date.now() + '_' + Math.random().toString(36).slice(2, 5),
       name: newGroupName.trim(),
@@ -1233,7 +1326,6 @@ export default function App() {
 
   const handleUpdateGroup = async () => {
     if (!currentUser || !activeGroup || !editGroupName.trim() || editGroupMembers.length === 0) return;
-    lastLocalEditRef.current = Date.now();
     const trimmedName = editGroupName.trim();
     const updatedMembers = Array.from(new Set([...editGroupMembers, currentUser.id]));
 
@@ -1269,7 +1361,6 @@ export default function App() {
 
   const handleDeleteGroup = async () => {
     if (!activeGroup) return;
-    lastLocalEditRef.current = Date.now();
     const groupId = activeGroup.id;
     const groupName = activeGroup.name;
 
@@ -1293,7 +1384,6 @@ export default function App() {
   };
 
   const handleConfirmMeeting = async (group, utcTimestamp) => {
-    lastLocalEditRef.current = Date.now();
     const meetingData = { utcTimestamp, members: group.members };
     try {
       await sbFetch('gemba_meetings', {
@@ -1312,7 +1402,6 @@ export default function App() {
   };
 
   const handleUnconfirmMeeting = async (groupId) => {
-    lastLocalEditRef.current = Date.now();
     try {
       await sbFetch(`gemba_meetings?group_id=eq.${encodeURIComponent(groupId)}`, {
         method: 'DELETE',
@@ -1621,10 +1710,17 @@ export default function App() {
         <div className="min-w-0">
           <div className="flex items-center gap-2">
             <h1 className="font-bold text-lg tracking-tight truncate">TimeSync GEMBA</h1>
-            <span className="inline-flex items-center gap-1 text-[10px] font-semibold px-2 py-0.5 rounded-full bg-emerald-500/20 text-emerald-300 border border-emerald-500/30 shrink-0">
-              <span className="w-1.5 h-1.5 rounded-full bg-emerald-400"></span>
-              EU Cloud Synced
-            </span>
+            {isSavingAvail ? (
+              <span className="inline-flex items-center gap-1 text-[10px] font-semibold px-2 py-0.5 rounded-full bg-amber-500/20 text-amber-300 border border-amber-500/30 shrink-0">
+                <span className="w-1.5 h-1.5 rounded-full bg-amber-400 animate-pulse"></span>
+                Saving...
+              </span>
+            ) : (
+              <span className="inline-flex items-center gap-1 text-[10px] font-semibold px-2 py-0.5 rounded-full bg-emerald-500/20 text-emerald-300 border border-emerald-500/30 shrink-0">
+                <span className="w-1.5 h-1.5 rounded-full bg-emerald-400"></span>
+                EU Cloud Synced
+              </span>
+            )}
           </div>
           <p className="text-slate-400 text-xs truncate">
             Signed in as <span className="text-slate-200 font-medium">{currentUser.name}</span>
