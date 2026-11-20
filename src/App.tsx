@@ -250,8 +250,9 @@ const downloadMeetingIcs = (groupName, utcTimestamp, memberEmails = []) => {
   const startStr = formatIcsUtc(utcTimestamp);
   const endStr = formatIcsUtc(utcTimestamp + 3600 * 1000);
   const nowStr = formatIcsUtc(Date.now());
-  const safeName = groupName.replace(/[,;\\]/g, ' ');
-  const attendeesLines = memberEmails.map(em => `ATTENDEE;RSVP=TRUE:mailto:${em}`).join('\r\n');
+  const safeName = groupName.replace(/[,;\]/g, ' ');
+  const attendeesLines = memberEmails.map(em => `ATTENDEE;RSVP=TRUE:mailto:${em}`).join('
+');
 
   const icsContent = [
     'BEGIN:VCALENDAR',
@@ -269,7 +270,8 @@ const downloadMeetingIcs = (groupName, utcTimestamp, memberEmails = []) => {
     attendeesLines,
     'END:VEVENT',
     'END:VCALENDAR'
-  ].filter(Boolean).join('\r\n');
+  ].filter(Boolean).join('
+');
 
   const blob = new Blob([icsContent], { type: 'text/calendar;charset=utf-8' });
   const url = URL.createObjectURL(blob);
@@ -299,10 +301,9 @@ const parseIcsDateToUtcMs = (rawValue, paramStr = '', fallbackTz = DETECTED_TIME
   if (!rawValue) return null;
   const val = rawValue.trim();
 
-  // All-day date YYYYMMDD -> skip treating as busy unless timed, or treat as local midnight
   const dateOnlyMatch = val.match(/^(\d{4})(\d{2})(\d{2})$/);
   if (dateOnlyMatch) {
-    return null; // Ignore all-day banners (holidays/OOO labels) so they don't grey out entire days
+    return null;
   }
 
   const dtMatch = val.match(/^(\d{4})(\d{2})(\d{2})T(\d{2})(\d{2})(\d{2})?(Z)?$/);
@@ -331,8 +332,12 @@ const parseIcsDateToUtcMs = (rawValue, paramStr = '', fallbackTz = DETECTED_TIME
 };
 
 const parseIcsFile = (icsText, fallbackTz) => {
-  const unfolded = icsText.replace(/\r\n[ \t]/g, '').replace(/\n[ \t]/g, '');
-  const lines = unfolded.split(/\r?\n/);
+  const unfolded = icsText.replace(/
+[ 	]/g, '').replace(/
+[ 	]/g, '');
+  const lines = unfolded.split(/
+?
+/);
   const events = [];
   let inEvent = false;
   let current = {};
@@ -390,7 +395,7 @@ const parseIcsFile = (icsText, fallbackTz) => {
     } else if (propName === 'DTEND') {
       current.end = parseIcsDateToUtcMs(value, params, fallbackTz);
     } else if (propName === 'SUMMARY') {
-      current.summary = value.replace(/\\,/g, ',').replace(/\\;/g, ';').replace(/\\n/g, ' ').trim();
+      current.summary = value.replace(/\,/g, ',').replace(/\;/g, ';').replace(/\n/g, ' ').trim();
     } else if (propName === 'RRULE') {
       current.rrule = value;
     } else if (propName === 'TRANSP') {
@@ -499,6 +504,9 @@ export default function App() {
   const [syncError, setSyncError] = useState('');
   const [toastMessage, setToastMessage] = useState('');
 
+  // Safeguard against background 20s poll overwriting in-flight local edits
+  const lastLocalEditRef = useRef(0);
+
   // Personal Local ICS Calendar Overlay (Never sent to Cloud)
   const [icsEvents, setIcsEvents] = useState([]);
   const [icsFileName, setIcsFileName] = useState('');
@@ -527,8 +535,10 @@ export default function App() {
   const [weekOffset, setWeekOffset] = useState(0);
   const currentBaseUtc = CURRENT_MONDAY + weekOffset * 7 * 24 * 3600 * 1000;
 
-  // Heatmap Override
+  // Heatmap Override & Interactive Slot Inspection
   const [heatmapUserId, setHeatmapUserId] = useState(null);
+  const [hoveredHeatmapTs, setHoveredHeatmapTs] = useState(null);
+  const [pinnedHeatmapTs, setPinnedHeatmapTs] = useState(null);
 
   // Group Creation State
   const [isCreatingGroup, setIsCreatingGroup] = useState(false);
@@ -639,6 +649,11 @@ export default function App() {
 
   // --- Cloud Sync Loader (Supabase REST) ---
   const syncFromCloud = useCallback(async (showFeedback = false) => {
+    if (!showFeedback && Date.now() - lastLocalEditRef.current < 6000) {
+      return;
+    }
+
+    const syncStartedAt = Date.now();
     setIsSyncing(true);
     setSyncError('');
     try {
@@ -648,6 +663,10 @@ export default function App() {
         sbFetch('gemba_availabilities?select=*'),
         sbFetch('gemba_meetings?select=*'),
       ]);
+
+      if (!showFeedback && lastLocalEditRef.current > syncStartedAt) {
+        return;
+      }
 
       const mappedUsers = (usersRows || []).map(r => ({
         id: r.id,
@@ -716,14 +735,17 @@ export default function App() {
     setConfirmingDelete(false);
   }, [currentUser?.id]);
 
-  // Reset quick-action toggle labels when switching weeks
+  // Reset quick-action toggle labels & heatmap selection when switching weeks or groups
   useEffect(() => {
     setToggles({ typical: false, weekend: false, custom: false });
-  }, [weekOffset]);
+    setHoveredHeatmapTs(null);
+    setPinnedHeatmapTs(null);
+  }, [weekOffset, activeGroupId]);
 
   // --- Save / Clear Per-Week Timezone Override ---
   const setWeekTimezoneOverride = async (newTz) => {
     if (!currentUser) return;
+    lastLocalEditRef.current = Date.now();
     const sentinelTs = -currentBaseUtc;
 
     setWeekTimezones(prev => {
@@ -887,6 +909,7 @@ export default function App() {
 
   // --- Cloud Write Helper for Availability ---
   const persistAvailabilityChanges = async (userId, upserts, deletes) => {
+    lastLocalEditRef.current = Date.now();
     try {
       if (upserts.length > 0) {
         await sbFetch('gemba_availabilities', {
@@ -909,6 +932,8 @@ export default function App() {
       }
     } catch {
       setSyncError('Failed to save availability to EU Cloud. Tap Refresh to retry.');
+    } finally {
+      lastLocalEditRef.current = Date.now();
     }
   };
 
@@ -997,14 +1022,14 @@ export default function App() {
   };
 
   // --- Scheduling & Grid Helpers ---
-  const getUserConfirmedMeeting = (userId, utcTimestamp) => {
+  const getUserConfirmedMeeting = useCallback((userId, utcTimestamp) => {
     for (const [groupId, meeting] of Object.entries(confirmedMeetings)) {
       if (meeting.utcTimestamp === utcTimestamp && meeting.members.includes(userId)) {
         return groups.find(g => g.id === groupId);
       }
     }
     return null;
-  };
+  }, [confirmedMeetings, groups]);
 
   const generateGrid = (timeZone, baseUtc, durationMin = 60) => {
     const grid = [];
@@ -1034,12 +1059,12 @@ export default function App() {
   const cycleState = (utcTimestamp) => {
     if (!currentUser) return;
     if (getUserConfirmedMeeting(currentUser.id, utcTimestamp)) return;
+    lastLocalEditRef.current = Date.now();
     const current = availabilities[currentUser.id]?.[utcTimestamp] || 'unavailable';
     const isBusyInIcs = Boolean(getBusyIcsEvent(utcTimestamp, slotDuration));
 
     let nextState = null;
     if (isBusyInIcs) {
-      // Grey (unavailable) <-> Amber (available)
       nextState = current === 'unavailable' ? 'available' : null;
     } else {
       if (current === 'unavailable') nextState = 'available';
@@ -1062,6 +1087,7 @@ export default function App() {
 
   const applyLocalPattern = (conditionFn, isAdding) => {
     if (!currentUser) return;
+    lastLocalEditRef.current = Date.now();
     const grid = generateGrid(activeTimezone, currentBaseUtc, slotDuration);
     const upserts = [];
     const deletes = [];
@@ -1089,6 +1115,7 @@ export default function App() {
 
   const clearWeek = () => {
     if (!currentUser) return;
+    lastLocalEditRef.current = Date.now();
     const grid = generateGrid(activeTimezone, currentBaseUtc, 30);
     const deletes = [];
     setAvailabilities(prev => {
@@ -1129,6 +1156,7 @@ export default function App() {
 
   const toggleCustom = () => {
     if (!currentUser || customPreset.length === 0) return;
+    lastLocalEditRef.current = Date.now();
     const isAdding = !toggles.custom;
     const grid = generateGrid(activeTimezone, currentBaseUtc, slotDuration);
     const upserts = [];
@@ -1174,6 +1202,7 @@ export default function App() {
   // --- Group CRUD Handlers ---
   const handleCreateGroup = async () => {
     if (!currentUser || !newGroupName.trim() || newGroupMembers.length === 0) return;
+    lastLocalEditRef.current = Date.now();
     const newGroup = {
       id: 'g_' + Date.now() + '_' + Math.random().toString(36).slice(2, 5),
       name: newGroupName.trim(),
@@ -1210,6 +1239,7 @@ export default function App() {
 
   const handleUpdateGroup = async () => {
     if (!currentUser || !activeGroup || !editGroupName.trim() || editGroupMembers.length === 0) return;
+    lastLocalEditRef.current = Date.now();
     const trimmedName = editGroupName.trim();
     const updatedMembers = Array.from(new Set([...editGroupMembers, currentUser.id]));
 
@@ -1245,6 +1275,7 @@ export default function App() {
 
   const handleDeleteGroup = async () => {
     if (!activeGroup) return;
+    lastLocalEditRef.current = Date.now();
     const groupId = activeGroup.id;
     const groupName = activeGroup.name;
 
@@ -1268,6 +1299,7 @@ export default function App() {
   };
 
   const handleConfirmMeeting = async (group, utcTimestamp) => {
+    lastLocalEditRef.current = Date.now();
     const meetingData = { utcTimestamp, members: group.members };
     try {
       await sbFetch('gemba_meetings', {
@@ -1286,6 +1318,7 @@ export default function App() {
   };
 
   const handleUnconfirmMeeting = async (groupId) => {
+    lastLocalEditRef.current = Date.now();
     try {
       await sbFetch(`gemba_meetings?group_id=eq.${encodeURIComponent(groupId)}`, {
         method: 'DELETE',
@@ -1317,6 +1350,32 @@ export default function App() {
     return `${p.hourStr}:${p.minuteStr} ${p.tzAbbr}`;
   };
 
+  // --- Member Breakdown Helper for any UTC Timestamp ---
+  const getMemberBreakdownForSlot = useCallback((group, utcTimestamp) => {
+    if (!group) return [];
+    return group.members
+      .map(memberId => cohort.find(u => u.id === memberId))
+      .filter(Boolean)
+      .map(userObj => {
+        let state = availabilities[userObj.id]?.[utcTimestamp] || 'unavailable';
+        const blockedByGroup = getUserConfirmedMeeting(userObj.id, utcTimestamp);
+        if (blockedByGroup) {
+          state = 'blocked';
+        }
+        const memberWeekTz = getUserTimezoneForWeek(userObj, currentBaseUtc);
+        const local = getLocalParts(utcTimestamp, memberWeekTz);
+        const isBadHour = local.hourNum >= 23 || local.hourNum < 6;
+        return {
+          user: userObj,
+          memberWeekTz,
+          state,
+          blockedGroupName: blockedByGroup?.name || null,
+          localHour: local.hourNum,
+          isBadHour,
+        };
+      });
+  }, [cohort, availabilities, getUserConfirmedMeeting, getUserTimezoneForWeek, currentBaseUtc]);
+
   // --- Overlap Engine (uses each member's timezone for the active week) ---
   const { rankedSlots, heatmapData } = useMemo(() => {
     if (!activeGroup) return { rankedSlots: [], heatmapData: {} };
@@ -1334,27 +1393,14 @@ export default function App() {
       let preferredCount = 0;
       let badHourPenalty = 0;
 
-      const memberStatuses = activeGroup.members
-        .map(memberId => cohort.find(u => u.id === memberId))
-        .filter(Boolean)
-        .map(userObj => {
-          let state = availabilities[userObj.id]?.[utcTimestamp] || 'unavailable';
-          if (getUserConfirmedMeeting(userObj.id, utcTimestamp)) {
-            state = 'blocked';
-          }
-
-          const memberWeekTz = getUserTimezoneForWeek(userObj, currentBaseUtc);
-          const local = getLocalParts(utcTimestamp, memberWeekTz);
-          const isBadHour = local.hourNum >= 23 || local.hourNum < 6;
-
-          if (state === 'available' || state === 'preferred') {
-            totalFree++;
-            if (state === 'preferred') preferredCount++;
-            if (isBadHour) badHourPenalty++;
-          }
-
-          return { user: userObj, memberWeekTz, state, localHour: local.hourNum, isBadHour };
-        });
+      const memberStatuses = getMemberBreakdownForSlot(activeGroup, utcTimestamp);
+      memberStatuses.forEach(ms => {
+        if (ms.state === 'available' || ms.state === 'preferred') {
+          totalFree++;
+          if (ms.state === 'preferred') preferredCount++;
+          if (ms.isBadHour) badHourPenalty++;
+        }
+      });
 
       hMap[utcTimestamp] = totalFree;
 
@@ -1380,7 +1426,7 @@ export default function App() {
       .slice(0, 10);
 
     return { rankedSlots: sorted, heatmapData: hMap };
-  }, [activeGroup, cohort, availabilities, confirmedMeetings, currentBaseUtc, getUserTimezoneForWeek]);
+  }, [activeGroup, currentBaseUtc, getMemberBreakdownForSlot]);
 
   // --- LOGIN / SIGNUP / RESET PORTAL ---
   if (!isAuthenticated || !currentUser) {
@@ -1556,6 +1602,16 @@ export default function App() {
         .map(id => cohort.find(u => u.id === id)?.email)
         .filter(Boolean)
     : [];
+
+  // Heatmap inspected slot (hover takes priority, otherwise pinned tap)
+  const inspectedHeatmapTs = hoveredHeatmapTs ?? pinnedHeatmapTs;
+  const heatmapViewUser = cohort.find(u => u.id === heatmapUserId) || currentUser;
+  const heatmapViewTz = getUserTimezoneForWeek(heatmapViewUser, currentBaseUtc);
+  const inspectedStatuses = (activeGroup && inspectedHeatmapTs)
+    ? getMemberBreakdownForSlot(activeGroup, inspectedHeatmapTs)
+    : [];
+  const inspectedFreeList = inspectedStatuses.filter(ms => ms.state === 'available' || ms.state === 'preferred');
+  const inspectedBusyList = inspectedStatuses.filter(ms => ms.state !== 'available' && ms.state !== 'preferred');
 
   // --- MAIN APP SHELL ---
   return (
@@ -2250,7 +2306,10 @@ export default function App() {
             {groupTab === 'heatmap' && (
               <div className="bg-white rounded-xl border border-slate-200 p-4 shadow-sm">
                 <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2 mb-4 border-b border-slate-100 pb-3">
-                  <div className="text-sm font-semibold text-slate-700">Group Heatmap</div>
+                  <div>
+                    <div className="text-sm font-semibold text-slate-700">Group Heatmap</div>
+                    <div className="text-[11px] text-slate-400">Hover or tap any slot to see who is free</div>
+                  </div>
                   <select
                     value={heatmapUserId || currentUser.id}
                     onChange={(e) => setHeatmapUserId(e.target.value)}
@@ -2270,7 +2329,7 @@ export default function App() {
                   </select>
                 </div>
 
-                <div className="overflow-x-auto">
+                <div className="overflow-x-auto" onMouseLeave={() => setHoveredHeatmapTs(null)}>
                   <div className="min-w-[600px] flex flex-col gap-0.5">
                     <div className="flex mb-1">
                       <div className="w-12"></div>
@@ -2280,11 +2339,7 @@ export default function App() {
                         </div>
                       ))}
                     </div>
-                    {generateGrid(
-                      getUserTimezoneForWeek(cohort.find(u => u.id === heatmapUserId) || currentUser, currentBaseUtc),
-                      currentBaseUtc,
-                      60
-                    ).map(day => (
+                    {generateGrid(heatmapViewTz, currentBaseUtc, 60).map(day => (
                       <div key={day.dayName} className="flex gap-0.5 items-center">
                         <div className="w-12 flex flex-col items-start justify-center">
                           <span className="text-xs font-medium text-slate-500 leading-none">{day.dayName}</span>
@@ -2294,15 +2349,30 @@ export default function App() {
                           const count = heatmapData[slot.utcTimestamp] || 0;
                           const total = Math.max(activeGroup.members.length, 1);
                           const ratio = count / total;
+                          const isSelected = inspectedHeatmapTs === slot.utcTimestamp;
                           const intensity = count === 0 ? 'bg-slate-50' :
                             ratio < 0.4 ? 'bg-emerald-100' :
                             ratio < 0.7 ? 'bg-emerald-300' :
                             ratio < 1 ? 'bg-emerald-500' : 'bg-emerald-700';
+
+                          const slotStatuses = getMemberBreakdownForSlot(activeGroup, slot.utcTimestamp);
+                          const freeNames = slotStatuses
+                            .filter(ms => ms.state === 'available' || ms.state === 'preferred')
+                            .map(ms => ms.user.name.split(' ')[0]);
+                          const busyNames = slotStatuses
+                            .filter(ms => ms.state !== 'available' && ms.state !== 'preferred')
+                            .map(ms => ms.user.name.split(' ')[0]);
+                          const richTooltip = `${day.dayName} ${slot.label} (${count}/${total} free)
+✓ Free: ${freeNames.length ? freeNames.join(', ') : 'None'}
+✕ Unavailable: ${busyNames.length ? busyNames.join(', ') : 'None'}`;
+
                           return (
                             <div
                               key={slot.utcTimestamp}
-                              title={`${count} / ${total} members available`}
-                              className={`flex-1 h-6 rounded-sm ${intensity} transition-colors hover:ring-1 hover:ring-black/20`}
+                              title={richTooltip}
+                              onMouseEnter={() => setHoveredHeatmapTs(slot.utcTimestamp)}
+                              onClick={() => setPinnedHeatmapTs(prev => prev === slot.utcTimestamp ? null : slot.utcTimestamp)}
+                              className={`flex-1 h-6 rounded-sm cursor-pointer ${intensity} transition-all ${isSelected ? 'ring-2 ring-indigo-600 scale-y-110 z-10' : 'hover:ring-1 hover:ring-black/30'}`}
                             ></div>
                           );
                         })}
@@ -2310,6 +2380,88 @@ export default function App() {
                     ))}
                   </div>
                 </div>
+
+                {/* Live Slot Member Breakdown Card (Hover or Tap) */}
+                {inspectedHeatmapTs ? (
+                  <div className="mt-4 p-3.5 rounded-xl bg-slate-50 border border-indigo-200 transition-all">
+                    <div className="flex items-center justify-between gap-2 mb-2.5 pb-2 border-b border-slate-200/80">
+                      <div className="flex items-center gap-2 flex-wrap">
+                        <span className="text-xs font-bold text-slate-900">
+                          {formatTimeForZoneFull(inspectedHeatmapTs, heatmapViewTz)}
+                        </span>
+                        <span className="text-[11px] font-semibold px-2 py-0.5 rounded-full bg-indigo-100 text-indigo-700">
+                          {inspectedFreeList.length} / {inspectedStatuses.length} Available
+                        </span>
+                      </div>
+                      {pinnedHeatmapTs && (
+                        <button
+                          onClick={() => { setPinnedHeatmapTs(null); setHoveredHeatmapTs(null); }}
+                          className="text-slate-400 hover:text-slate-700 p-0.5"
+                          title="Close slot details"
+                        >
+                          <X className="w-3.5 h-3.5" />
+                        </button>
+                      )}
+                    </div>
+
+                    <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 text-xs">
+                      <div>
+                        <div className="text-[10px] font-bold uppercase tracking-wider text-emerald-700 mb-1.5">
+                          Available ({inspectedFreeList.length})
+                        </div>
+                        {inspectedFreeList.length === 0 ? (
+                          <div className="text-slate-400 italic text-[11px]">Nobody free at this hour</div>
+                        ) : (
+                          <div className="flex flex-wrap gap-1.5">
+                            {inspectedFreeList.map(ms => (
+                              <span
+                                key={ms.user.id}
+                                className={`inline-flex items-center gap-1 px-2 py-1 rounded-md font-medium border ${ms.state === 'preferred' ? 'bg-indigo-50 text-indigo-800 border-indigo-200' : 'bg-emerald-50 text-emerald-800 border-emerald-200'}`}
+                              >
+                                <Check className="w-3 h-3 shrink-0" strokeWidth={3} />
+                                <span>{ms.user.name.split(' ')[0]}</span>
+                                <span className={`font-mono text-[10px] ${ms.isBadHour ? 'text-red-600 font-bold' : 'opacity-75'}`}>
+                                  ({formatTimeForZoneShort(inspectedHeatmapTs, ms.memberWeekTz)})
+                                </span>
+                                {ms.state === 'preferred' && <span className="text-[9px] font-bold text-indigo-600">★</span>}
+                              </span>
+                            ))}
+                          </div>
+                        )}
+                      </div>
+
+                      <div>
+                        <div className="text-[10px] font-bold uppercase tracking-wider text-slate-500 mb-1.5">
+                          Unavailable ({inspectedBusyList.length})
+                        </div>
+                        {inspectedBusyList.length === 0 ? (
+                          <div className="text-emerald-600 font-medium text-[11px]">Everyone is free!</div>
+                        ) : (
+                          <div className="flex flex-wrap gap-1.5">
+                            {inspectedBusyList.map(ms => (
+                              <span
+                                key={ms.user.id}
+                                className={`inline-flex items-center gap-1 px-2 py-1 rounded-md border ${ms.state === 'blocked' ? 'bg-red-50 text-red-700 border-red-200' : 'bg-white text-slate-500 border-slate-200'}`}
+                              >
+                                <X className="w-3 h-3 shrink-0" />
+                                <span>{ms.user.name.split(' ')[0]}</span>
+                                <span className="font-mono text-[10px] opacity-75">
+                                  ({formatTimeForZoneShort(inspectedHeatmapTs, ms.memberWeekTz)})
+                                </span>
+                                {ms.state === 'blocked' && <span className="text-[9px] font-bold">(In Meeting)</span>}
+                              </span>
+                            ))}
+                          </div>
+                        )}
+                      </div>
+                    </div>
+                  </div>
+                ) : (
+                  <div className="mt-4 py-2.5 px-3 rounded-lg bg-slate-50 border border-dashed border-slate-200 text-center text-[11px] text-slate-400">
+                    Hover over or tap any cell above to inspect who is available and their local time.
+                  </div>
+                )}
+
                 <div className="flex justify-end gap-2 mt-4 text-[10px] text-slate-500 font-medium">
                   <div className="flex items-center gap-1"><div className="w-2 h-2 bg-slate-50 border border-slate-200"></div> 0</div>
                   <div className="flex items-center gap-1"><div className="w-2 h-2 bg-emerald-100"></div> Low</div>
