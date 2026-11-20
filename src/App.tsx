@@ -500,13 +500,26 @@ export default function App() {
   const [toastMessage, setToastMessage] = useState('');
 
   // --- VPN-Resilient Batch Queue & In-Flight Slot Protection ---
-  // Tracks pending slot mutations: { [utcTs]: { state: 'available'|'preferred'|null, tz: string } }
   const pendingMutationsRef = useRef({});
-  // Tracks slots currently being sent over the network so Refresh never clobbers in-flight clicks
   const inFlightMutationsRef = useRef({});
   const flushTimerRef = useRef(null);
   const isFlushingRef = useRef(false);
   const currentUserIdRef = useRef(null);
+
+  // --- Touch / Thumb Scroll Guard (Prevents accidental slot toggles while panning on mobile) ---
+  const touchGestureRef = useRef({
+    startX: 0,
+    startY: 0,
+    moved: false,
+    active: false,
+    lastTouchTime: 0,
+  });
+
+  // Mobile Day Selector for Phone-Optimized Portrait View (0 = Mon ... 6 = Sun)
+  const [mobileDayIdx, setMobileDayIdx] = useState(() => {
+    const d = new Date().getDay();
+    return d === 0 ? 6 : d - 1;
+  });
 
   // Personal Local ICS Calendar Overlay (Never sent to Cloud)
   const [icsEvents, setIcsEvents] = useState([]);
@@ -593,7 +606,6 @@ export default function App() {
     isFlushingRef.current = true;
     setIsSavingAvail(true);
 
-    // Move queued items into inFlight so newer clicks during the network call queue cleanly
     const batch = { ...pendingMutationsRef.current };
     pendingMutationsRef.current = {};
     inFlightMutationsRef.current = { ...inFlightMutationsRef.current, ...batch };
@@ -622,7 +634,6 @@ export default function App() {
         });
       }
       if (deletes.length > 0) {
-        // Chunk deletes into safe URL lengths
         for (let i = 0; i < deletes.length; i += 80) {
           const chunk = deletes.slice(i, i + 80).join(',');
           await sbFetch(`gemba_availabilities?user_id=eq.${encodeURIComponent(uid)}&utc_ts=in.(${chunk})`, {
@@ -632,7 +643,6 @@ export default function App() {
       }
       setSyncError('');
     } catch {
-      // Re-queue any failed mutations that weren't superseded by newer clicks
       for (const [tsStr, item] of Object.entries(batch)) {
         if (!(tsStr in pendingMutationsRef.current)) {
           pendingMutationsRef.current[tsStr] = item;
@@ -645,7 +655,6 @@ export default function App() {
       }
       isFlushingRef.current = false;
 
-      // If more clicks arrived while this batch was flying over the VPN, flush immediately
       if (Object.keys(pendingMutationsRef.current).length > 0) {
         flushTimerRef.current = setTimeout(() => {
           flushPendingMutations();
@@ -741,7 +750,6 @@ export default function App() {
   };
 
   // --- Cloud Sync Loader (Supabase REST) ---
-  // Background polls NEVER overwrite the signed-in user's local grid; manual Refresh merges safely on top of any pending/in-flight clicks.
   const syncFromCloud = useCallback(async (forceFullRefresh = false) => {
     setIsSyncing(true);
     if (forceFullRefresh) setSyncError('');
@@ -793,10 +801,8 @@ export default function App() {
       const activeUid = currentUserIdRef.current;
 
       setAvailabilities(prev => {
-        // Not signed in yet: accept full cloud snapshot
         if (!activeUid) return cloudAvail;
 
-        // Background 20s poll: update teammates only, preserve signed-in user's local grid 100%
         if (!forceFullRefresh && prev[activeUid]) {
           return {
             ...cloudAvail,
@@ -804,7 +810,6 @@ export default function App() {
           };
         }
 
-        // Manual Refresh (or initial hydration): start from cloud and re-apply any in-flight/pending local clicks
         const mergedOwn = { ...(cloudAvail[activeUid] || {}) };
         const unconfirmed = {
           ...inFlightMutationsRef.current,
@@ -1174,6 +1179,48 @@ export default function App() {
     } else {
       queueAvailabilityMutations([], [utcTimestamp], activeTimezone);
     }
+  };
+
+  // --- Touch-Safe Slot Tap Handlers (Ignores thumb drags > 8px) ---
+  const handleSlotTouchStart = (e) => {
+    const t = e.touches?.[0];
+    if (!t) return;
+    touchGestureRef.current = {
+      startX: t.clientX,
+      startY: t.clientY,
+      moved: false,
+      active: true,
+      lastTouchTime: Date.now(),
+    };
+  };
+
+  const handleSlotTouchMove = (e) => {
+    if (!touchGestureRef.current.active) return;
+    const t = e.touches?.[0];
+    if (!t) return;
+    const dx = Math.abs(t.clientX - touchGestureRef.current.startX);
+    const dy = Math.abs(t.clientY - touchGestureRef.current.startY);
+    if (dx > 8 || dy > 8) {
+      touchGestureRef.current.moved = true;
+    }
+  };
+
+  const handleSlotTouchEnd = (e, utcTimestamp) => {
+    const g = touchGestureRef.current;
+    g.lastTouchTime = Date.now();
+    const wasTap = g.active && !g.moved;
+    g.active = false;
+    g.moved = false;
+    if (wasTap) {
+      if (e.cancelable) e.preventDefault(); // Prevent synthetic delayed mouse click
+      cycleState(utcTimestamp);
+    }
+  };
+
+  const handleSlotClick = (utcTimestamp) => {
+    // Ignore synthetic click events fired right after a touch gesture
+    if (Date.now() - touchGestureRef.current.lastTouchTime < 500) return;
+    cycleState(utcTimestamp);
   };
 
   const applyLocalPattern = (conditionFn, isAdding) => {
@@ -1696,6 +1743,12 @@ export default function App() {
   const inspectedFreeList = inspectedStatuses.filter(ms => ms.state === 'available' || ms.state === 'preferred');
   const inspectedBusyList = inspectedStatuses.filter(ms => ms.state !== 'available' && ms.state !== 'preferred');
 
+  // Pre-build week grid for My Avail (used by both Mobile Day View and Desktop Matrix View)
+  const availWeekGrid = activeTab === 'avail'
+    ? generateGrid(activeTimezone, currentBaseUtc, slotDuration)
+    : [];
+  const activeMobileDay = availWeekGrid[mobileDayIdx] || availWeekGrid[0];
+
   // --- MAIN APP SHELL ---
   return (
     <div className="min-h-screen bg-slate-50 text-slate-800 font-sans flex flex-col max-w-3xl mx-auto shadow-xl relative">
@@ -1706,10 +1759,10 @@ export default function App() {
         </div>
       )}
 
-      <header className="bg-slate-900 text-white p-4 flex justify-between items-center shrink-0 z-20 gap-2">
+      <header className="bg-slate-900 text-white p-3.5 sm:p-4 flex justify-between items-center shrink-0 z-20 gap-2">
         <div className="min-w-0">
           <div className="flex items-center gap-2">
-            <h1 className="font-bold text-lg tracking-tight truncate">TimeSync GEMBA</h1>
+            <h1 className="font-bold text-base sm:text-lg tracking-tight truncate">TimeSync GEMBA</h1>
             {isSavingAvail ? (
               <span className="inline-flex items-center gap-1 text-[10px] font-semibold px-2 py-0.5 rounded-full bg-amber-500/20 text-amber-300 border border-amber-500/30 shrink-0">
                 <span className="w-1.5 h-1.5 rounded-full bg-amber-400 animate-pulse"></span>
@@ -1718,7 +1771,7 @@ export default function App() {
             ) : (
               <span className="inline-flex items-center gap-1 text-[10px] font-semibold px-2 py-0.5 rounded-full bg-emerald-500/20 text-emerald-300 border border-emerald-500/30 shrink-0">
                 <span className="w-1.5 h-1.5 rounded-full bg-emerald-400"></span>
-                EU Cloud Synced
+                <span className="hidden xs:inline">EU Cloud</span> Synced
               </span>
             )}
           </div>
@@ -1726,7 +1779,7 @@ export default function App() {
             Signed in as <span className="text-slate-200 font-medium">{currentUser.name}</span>
           </p>
         </div>
-        <div className="flex items-center gap-2 shrink-0">
+        <div className="flex items-center gap-1.5 sm:gap-2 shrink-0">
           <button
             onClick={() => syncFromCloud(true)}
             disabled={isSyncing}
@@ -1763,17 +1816,17 @@ export default function App() {
 
       {/* Global ISO 8601 Week Navigator (Only shown on My Avail & Group Detail) */}
       {showWeekNav && (
-        <div className="bg-slate-800 text-slate-200 px-4 py-2.5 flex items-center justify-between text-sm shadow-inner z-10 shrink-0 border-t border-slate-700">
+        <div className="bg-slate-800 text-slate-200 px-3 sm:px-4 py-2 flex items-center justify-between text-xs sm:text-sm shadow-inner z-10 shrink-0 border-t border-slate-700">
           <button onClick={() => setWeekOffset(w => w - 1)} className="px-2 py-1 hover:bg-slate-700 hover:text-white rounded flex items-center gap-1 transition-colors">
             <ChevronLeft className="w-4 h-4" /> Prev
           </button>
-          <div className="flex flex-col sm:flex-row items-center gap-1 sm:gap-2 text-center">
+          <div className="flex flex-col sm:flex-row items-center gap-0.5 sm:gap-2 text-center">
             <div className="font-semibold text-white flex items-center gap-1.5">
-              <Calendar className="w-4 h-4 text-indigo-400" />
+              <Calendar className="w-3.5 h-3.5 sm:w-4 sm:h-4 text-indigo-400" />
               <span>{weekInfo.primary}</span>
             </div>
             {weekInfo.relative && (
-              <span className="text-[10px] font-bold uppercase tracking-wider bg-indigo-500/30 text-indigo-200 px-2 py-0.5 rounded-full border border-indigo-400/30">
+              <span className="text-[9px] sm:text-[10px] font-bold uppercase tracking-wider bg-indigo-500/30 text-indigo-200 px-2 py-0.5 rounded-full border border-indigo-400/30">
                 {weekInfo.relative}
               </span>
             )}
@@ -1787,18 +1840,18 @@ export default function App() {
       {/* TAB 1: MY AVAIL */}
       {activeTab === 'avail' && (
         <div className="flex-1 flex flex-col overflow-hidden bg-white">
-          <div className="bg-blue-50 border-b border-blue-100 p-3 px-4 flex flex-col gap-2 shrink-0">
+          <div className="bg-blue-50 border-b border-blue-100 p-2.5 sm:p-3 px-3 sm:px-4 flex flex-col gap-2 shrink-0">
             <div className="flex items-center justify-between gap-2">
-              <div className="flex items-center gap-1.5 text-blue-900 font-semibold text-xs sm:text-sm">
+              <div className="flex items-center gap-1.5 text-blue-900 font-semibold text-xs sm:text-sm min-w-0">
                 <MapPin className="w-4 h-4 text-blue-600 shrink-0" />
-                <span>
+                <span className="truncate">
                   {travelModeEnabled
                     ? `Traveling (${weekInfo.primary.split(' • ')[0]}): ${activeTimezone.replace(/_/g, ' ')}`
                     : `Home: ${currentUser.timezone.replace(/_/g, ' ')}`}
                 </span>
               </div>
-              <label className="inline-flex items-center gap-2 cursor-pointer text-xs font-semibold text-blue-800 shrink-0">
-                <span>Travel this week</span>
+              <label className="inline-flex items-center gap-1.5 cursor-pointer text-xs font-semibold text-blue-800 shrink-0">
+                <span>Travel</span>
                 <input
                   type="checkbox"
                   checked={travelModeEnabled}
@@ -1821,37 +1874,36 @@ export default function App() {
             )}
           </div>
 
-          <div className="p-3 sm:p-4 border-b border-slate-100 shrink-0 bg-slate-50">
-            <div className="flex flex-wrap gap-2 items-center">
+          {/* Toolbar: Horizontally scrollable on mobile so it stays compact and never crowds the grid */}
+          <div className="p-2.5 sm:p-4 border-b border-slate-100 shrink-0 bg-slate-50">
+            <div className="flex sm:flex-wrap gap-1.5 sm:gap-2 items-center overflow-x-auto pb-1 sm:pb-0 no-scrollbar">
               <button
                 onClick={toggleTypical}
-                className={`px-3 py-1.5 rounded-full text-xs font-medium transition-colors border shadow-sm ${toggles.typical ? 'bg-blue-600 text-white border-blue-600' : 'bg-white text-slate-600 border-slate-200 hover:bg-slate-100'}`}
+                className={`px-3 py-1.5 rounded-full text-xs font-medium transition-colors border shadow-sm shrink-0 ${toggles.typical ? 'bg-blue-600 text-white border-blue-600' : 'bg-white text-slate-600 border-slate-200 hover:bg-slate-100'}`}
               >
-                Typical Week {toggles.typical ? '(Remove)' : '(Add)'}
+                Typical Week {toggles.typical ? '✓' : '+'}
               </button>
               <button
                 onClick={toggleWeekend}
-                className={`px-3 py-1.5 rounded-full text-xs font-medium transition-colors border shadow-sm ${toggles.weekend ? 'bg-blue-600 text-white border-blue-600' : 'bg-white text-slate-600 border-slate-200 hover:bg-slate-100'}`}
+                className={`px-3 py-1.5 rounded-full text-xs font-medium transition-colors border shadow-sm shrink-0 ${toggles.weekend ? 'bg-blue-600 text-white border-blue-600' : 'bg-white text-slate-600 border-slate-200 hover:bg-slate-100'}`}
               >
-                {isFriSatWeekend ? 'Fri–Sat Weekend' : 'Weekend'} {toggles.weekend ? '(Remove)' : '(Add)'}
+                {isFriSatWeekend ? 'Fri–Sat' : 'Weekend'} {toggles.weekend ? '✓' : '+'}
               </button>
 
-              <div className="flex items-center gap-1">
-                <button
-                  onClick={toggleCustom}
-                  disabled={customPreset.length === 0}
-                  className={`px-3 py-1.5 rounded-full text-xs font-medium transition-colors border shadow-sm ${customPreset.length === 0 ? 'opacity-50 cursor-not-allowed bg-slate-100 text-slate-400' : toggles.custom ? 'bg-indigo-600 text-white border-indigo-600' : 'bg-white text-slate-600 border-slate-200 hover:bg-slate-100'}`}
-                >
-                  Custom Preset {customPreset.length > 0 ? (toggles.custom ? '(Remove)' : '(Add)') : '(Empty)'}
-                </button>
-                <button
-                  onClick={saveCustomPreset}
-                  title="Save current week as custom preset"
-                  className="px-2.5 py-1.5 rounded-full bg-white border border-slate-200 text-slate-600 hover:text-indigo-600 hover:bg-indigo-50 shadow-sm transition-colors text-xs font-medium flex items-center gap-1"
-                >
-                  <Save className="w-3.5 h-3.5" /> Save Preset
-                </button>
-              </div>
+              <button
+                onClick={toggleCustom}
+                disabled={customPreset.length === 0}
+                className={`px-3 py-1.5 rounded-full text-xs font-medium transition-colors border shadow-sm shrink-0 ${customPreset.length === 0 ? 'opacity-50 cursor-not-allowed bg-slate-100 text-slate-400' : toggles.custom ? 'bg-indigo-600 text-white border-indigo-600' : 'bg-white text-slate-600 border-slate-200 hover:bg-slate-100'}`}
+              >
+                Preset {customPreset.length > 0 ? (toggles.custom ? '✓' : '+') : '(Empty)'}
+              </button>
+              <button
+                onClick={saveCustomPreset}
+                title="Save current week as custom preset"
+                className="px-2.5 py-1.5 rounded-full bg-white border border-slate-200 text-slate-600 hover:text-indigo-600 hover:bg-indigo-50 shadow-sm transition-colors text-xs font-medium flex items-center gap-1 shrink-0"
+              >
+                <Save className="w-3.5 h-3.5" /> Save Preset
+              </button>
 
               {/* Personal Local .ics Calendar Overlay */}
               <input
@@ -1861,11 +1913,11 @@ export default function App() {
                 onChange={handleIcsUpload}
                 className="hidden"
               />
-              <div className="flex items-center gap-1">
+              <div className="flex items-center gap-1 shrink-0">
                 <button
                   onClick={() => icsInputRef.current?.click()}
                   title="Overlay your Outlook/Google/Apple .ics calendar locally (private, never uploaded)"
-                  className="px-3 py-1.5 rounded-full text-xs font-medium bg-white text-slate-700 border border-slate-300 hover:bg-slate-100 shadow-sm transition-colors flex items-center gap-1.5"
+                  className="px-3 py-1.5 rounded-full text-xs font-medium bg-white text-slate-700 border border-slate-300 hover:bg-slate-100 shadow-sm transition-colors flex items-center gap-1.5 shrink-0"
                 >
                   <Upload className="w-3.5 h-3.5 text-indigo-600" />
                   <span>{icsFileName ? 'Replace .ics' : 'Import .ics'}</span>
@@ -1874,7 +1926,7 @@ export default function App() {
                   <button
                     onClick={handleClearIcs}
                     title={`Clear calendar overlay (${icsFileName})`}
-                    className="p-1.5 rounded-full bg-white border border-slate-200 text-slate-400 hover:text-red-600 hover:bg-red-50 shadow-sm transition-colors"
+                    className="p-1.5 rounded-full bg-white border border-slate-200 text-slate-400 hover:text-red-600 hover:bg-red-50 shadow-sm transition-colors shrink-0"
                   >
                     <X className="w-3.5 h-3.5" />
                   </button>
@@ -1883,21 +1935,21 @@ export default function App() {
 
               <button
                 onClick={clearWeek}
-                className="px-3 py-1.5 rounded-full text-xs font-medium bg-white text-red-600 border border-red-200 hover:bg-red-50 shadow-sm transition-colors ml-auto flex items-center gap-1"
+                className="px-3 py-1.5 rounded-full text-xs font-medium bg-white text-red-600 border border-red-200 hover:bg-red-50 shadow-sm transition-colors sm:ml-auto flex items-center gap-1 shrink-0"
               >
-                <Trash2 className="w-3 h-3" /> Clear All
+                <Trash2 className="w-3 h-3" /> Clear
               </button>
             </div>
 
-            <div className="flex flex-wrap items-center justify-between gap-2 mt-3 text-[11px] text-slate-500">
-              <div className="flex flex-wrap items-center gap-3">
-                <span className="flex items-center gap-1"><span className="w-3 h-3 rounded-sm bg-blue-400 inline-block"></span> Available</span>
-                <span className="flex items-center gap-1"><span className="w-3 h-3 rounded-sm bg-indigo-700 inline-block"></span> Preferred</span>
-                <span className="flex items-center gap-1"><span className="w-3 h-3 rounded-sm bg-emerald-500 inline-block"></span> Confirmed</span>
+            <div className="flex flex-wrap items-center justify-between gap-2 mt-2.5 text-[11px] text-slate-500">
+              <div className="flex flex-wrap items-center gap-2.5 sm:gap-3">
+                <span className="flex items-center gap-1"><span className="w-2.5 h-2.5 rounded-sm bg-blue-400 inline-block"></span> Available</span>
+                <span className="flex items-center gap-1"><span className="w-2.5 h-2.5 rounded-sm bg-indigo-700 inline-block"></span> Preferred</span>
+                <span className="flex items-center gap-1"><span className="w-2.5 h-2.5 rounded-sm bg-emerald-500 inline-block"></span> Confirmed</span>
                 {icsEvents.length > 0 && (
                   <>
-                    <span className="flex items-center gap-1"><span className="w-3 h-3 rounded-sm bg-slate-300 inline-block"></span> Busy (.ics)</span>
-                    <span className="flex items-center gap-1"><span className="w-3 h-3 rounded-sm bg-amber-400 inline-block"></span> Conflict (Free)</span>
+                    <span className="flex items-center gap-1"><span className="w-2.5 h-2.5 rounded-sm bg-slate-300 inline-block"></span> Busy</span>
+                    <span className="flex items-center gap-1"><span className="w-2.5 h-2.5 rounded-sm bg-amber-400 inline-block"></span> Conflict</span>
                   </>
                 )}
               </div>
@@ -1918,7 +1970,100 @@ export default function App() {
             </div>
           </div>
 
-          <main className="flex-1 overflow-auto bg-white relative">
+          {/* ================================================================= */}
+          {/* MOBILE-OPTIMIZED PORTRAIT DAY VIEW (< 640px) — Zero Side-Scroll   */}
+          {/* ================================================================= */}
+          <div className="flex-1 flex flex-col overflow-hidden sm:hidden bg-white">
+            {/* Day Selector Pills (Mon - Sun with slot count badge) */}
+            <div className="grid grid-cols-7 gap-1 p-2 bg-slate-100 border-b border-slate-200 shrink-0">
+              {availWeekGrid.map((day, idx) => {
+                const isSelected = idx === mobileDayIdx;
+                const freeCount = day.slots.filter(s => {
+                  const st = availabilities[currentUser.id]?.[s.utcTimestamp];
+                  return st === 'available' || st === 'preferred';
+                }).length;
+                return (
+                  <button
+                    key={day.dayName}
+                    type="button"
+                    onClick={() => setMobileDayIdx(idx)}
+                    className={`py-1.5 px-1 rounded-lg flex flex-col items-center justify-center transition-all ${isSelected ? 'bg-indigo-600 text-white shadow-sm' : 'bg-white text-slate-600 border border-slate-200'}`}
+                  >
+                    <span className="text-[10px] font-bold uppercase leading-tight">{day.dayName}</span>
+                    <span className={`text-xs font-semibold leading-tight mt-0.5 ${isSelected ? 'text-indigo-100' : 'text-slate-800'}`}>{day.dateStr}</span>
+                    <span className={`mt-1 w-1.5 h-1.5 rounded-full ${freeCount > 0 ? (isSelected ? 'bg-emerald-300' : 'bg-blue-500') : 'bg-transparent'}`}></span>
+                  </button>
+                );
+              })}
+            </div>
+
+            {/* Vertical Touch-Safe Slot List for Selected Day */}
+            <div className="flex-1 overflow-y-auto p-3 pb-6 flex flex-col gap-2">
+              <div className="flex items-center justify-between text-xs text-slate-500 px-1 pb-1">
+                <span className="font-bold text-slate-800">
+                  {activeMobileDay?.dayName}, {activeMobileDay?.dateStr}
+                </span>
+                <span>Tap a slot to cycle status</span>
+              </div>
+
+              {activeMobileDay?.slots.map(slot => {
+                const state = availabilities[currentUser.id]?.[slot.utcTimestamp] || 'unavailable';
+                const confirmedGroup = getUserConfirmedMeeting(currentUser.id, slot.utcTimestamp);
+                const busyEvent = confirmedGroup ? null : getBusyIcsEvent(slot.utcTimestamp, slotDuration);
+                const isConflict = Boolean(busyEvent && (state === 'available' || state === 'preferred'));
+
+                let cardStyle = 'bg-white border-slate-200 text-slate-700';
+                let badgeText = 'Unavailable';
+                let badgeStyle = 'bg-slate-100 text-slate-400';
+
+                if (confirmedGroup) {
+                  cardStyle = 'bg-emerald-500 border-emerald-600 text-white shadow-sm';
+                  badgeText = `Confirmed: ${confirmedGroup.name}`;
+                  badgeStyle = 'bg-emerald-600/60 text-white';
+                } else if (isConflict) {
+                  cardStyle = 'bg-amber-100 border-amber-400 text-amber-950';
+                  badgeText = `Free • Conflict: ${busyEvent.summary}`;
+                  badgeStyle = 'bg-amber-400 text-amber-950 font-bold';
+                } else if (busyEvent) {
+                  cardStyle = 'bg-slate-100 border-slate-300 text-slate-500';
+                  badgeText = `Busy (.ics): ${busyEvent.summary}`;
+                  badgeStyle = 'bg-slate-200 text-slate-600';
+                } else if (state === 'available') {
+                  cardStyle = 'bg-blue-50 border-blue-400 text-blue-950';
+                  badgeText = 'Available';
+                  badgeStyle = 'bg-blue-500 text-white font-semibold';
+                } else if (state === 'preferred') {
+                  cardStyle = 'bg-indigo-700 border-indigo-800 text-white shadow-sm';
+                  badgeText = '★ Preferred';
+                  badgeStyle = 'bg-indigo-900/60 text-indigo-100 font-semibold';
+                }
+
+                return (
+                  <button
+                    key={slot.utcTimestamp}
+                    type="button"
+                    onTouchStart={handleSlotTouchStart}
+                    onTouchMove={handleSlotTouchMove}
+                    onTouchEnd={(e) => handleSlotTouchEnd(e, slot.utcTimestamp)}
+                    onClick={() => handleSlotClick(slot.utcTimestamp)}
+                    className={`w-full min-h-[46px] px-3.5 py-2.5 rounded-xl border flex items-center justify-between gap-3 text-left transition-transform active:scale-[0.99] select-none ${cardStyle}`}
+                  >
+                    <span className="font-mono text-sm font-bold shrink-0">{slot.label}</span>
+                    <span className={`text-xs px-2.5 py-1 rounded-full truncate flex items-center gap-1.5 ${badgeStyle}`}>
+                      {confirmedGroup && <Check className="w-3.5 h-3.5 shrink-0" strokeWidth={3} />}
+                      {!confirmedGroup && isConflict && <AlertTriangle className="w-3.5 h-3.5 shrink-0" strokeWidth={2.5} />}
+                      <span className="truncate">{badgeText}</span>
+                    </span>
+                  </button>
+                );
+              })}
+            </div>
+          </div>
+
+          {/* ================================================================= */}
+          {/* DESKTOP / TABLET FULL WEEK MATRIX (>= 640px)                      */}
+          {/* ================================================================= */}
+          <main className="hidden sm:block flex-1 overflow-auto bg-white relative">
             <div className={`${slotDuration === 30 ? 'min-w-[1200px]' : 'min-w-[740px]'} h-full flex flex-col`}>
               <div className="flex sticky top-0 bg-slate-50 border-b border-slate-200 z-10">
                 <div className="w-16 flex-none border-r border-slate-200"></div>
@@ -1932,7 +2077,7 @@ export default function App() {
               </div>
 
               <div className="flex-1 flex flex-col pb-4">
-                {generateGrid(activeTimezone, currentBaseUtc, slotDuration).map(day => (
+                {availWeekGrid.map(day => (
                   <div key={day.dayName} className="flex flex-1 min-h-[48px] border-b border-slate-100">
                     <div className="w-16 flex-none flex flex-col items-center justify-center font-medium text-slate-500 border-r border-slate-200 bg-slate-50 sticky left-0 z-10">
                       <span className="text-sm leading-tight">{day.dayName}</span>
@@ -1967,8 +2112,11 @@ export default function App() {
                           <div
                             key={slot.utcTimestamp}
                             title={tooltip}
-                            onPointerDown={() => cycleState(slot.utcTimestamp)}
-                            className={`flex-1 h-10 border rounded-sm cursor-pointer transition-colors hover:brightness-95 active:scale-95 ${bgColor}`}
+                            onTouchStart={handleSlotTouchStart}
+                            onTouchMove={handleSlotTouchMove}
+                            onTouchEnd={(e) => handleSlotTouchEnd(e, slot.utcTimestamp)}
+                            onClick={() => handleSlotClick(slot.utcTimestamp)}
+                            className={`flex-1 h-10 border rounded-sm cursor-pointer transition-colors hover:brightness-95 select-none ${bgColor}`}
                           >
                             {confirmedGroup && <Check className="w-3.5 h-3.5 m-auto" strokeWidth={3} />}
                             {!confirmedGroup && isConflict && <AlertTriangle className="w-3.5 h-3.5 m-auto" strokeWidth={2.5} />}
@@ -2460,7 +2608,7 @@ export default function App() {
                               title={richTooltip}
                               onMouseEnter={() => setHoveredHeatmapTs(slot.utcTimestamp)}
                               onClick={() => setPinnedHeatmapTs(prev => prev === slot.utcTimestamp ? null : slot.utcTimestamp)}
-                              className={`flex-1 h-6 rounded-sm cursor-pointer ${intensity} transition-all ${isSelected ? 'ring-2 ring-indigo-600 scale-y-110 z-10' : 'hover:ring-1 hover:ring-black/30'}`}
+                              className={`flex-1 h-7 sm:h-6 rounded-sm cursor-pointer ${intensity} transition-all ${isSelected ? 'ring-2 ring-indigo-600 scale-y-110 z-10' : 'hover:ring-1 hover:ring-black/30'}`}
                             ></div>
                           );
                         })}
